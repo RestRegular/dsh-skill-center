@@ -1,6 +1,6 @@
 {
   "name": "@restregular/dsh-skill-center",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "技能中心 — DeepSeek Harness 技能管理面板：浏览当前会话可见的所有技能、查看正文、开关模型/用户调用、新建与删除。 · Skill Center for DeepSeek Harness: browse and manage the skills visible to the current session.",
   "type": "module",
   "main": "lib/index.js",

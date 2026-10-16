@@ -21,3 +21,11 @@ Thumbs.db
 *.pem
 *.key
 .credentials.yaml
+
+# local release scratch (see publish.local.ps1)
+.gh-api.mjs
+.gh-push.mjs
+.npm-put.mjs
+.npm-manifest.mjs
+.git-credential.ps1
+publish.local.ps1
