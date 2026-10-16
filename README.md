@@ -1,4 +1,4 @@
-﻿# dsh-skill-center · 技能中心
+# dsh-skill-center · 技能中心
 
 [![npm](https://img.shields.io/npm/v/@restregular/dsh-skill-center?color=cb3837&logo=npm)](https://www.npmjs.com/package/@restregular/dsh-skill-center)
 [![license](https://img.shields.io/npm/l/@restregular/dsh-skill-center?color=blue)](./LICENSE)
@@ -39,7 +39,64 @@ Sidebar                                   Main area
 | Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root |
 | Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete |
 | Read-only guard | Skills embedded in plugins (e.g. `office-docx`) are labelled *embedded* and their switches/deletion are disabled |
+| Bundled skill | Ships an embedded **`skill-authoring`** skill (guidance + `references/` + a starter template) that teaches the agent which root a skill belongs in, what the frontmatter contract is, and where a skill's resource files go |
+| Model tool | Registers **`skill_create`**, which writes `<root>/<name>/SKILL.md` plus any resource files in one call — the path that works for skill roots outside the session workspace, where the file-write tools are sandboxed |
 | Security | Every write is confined to managed skill roots that really exist on disk; requests from non-loopback origins get `403` |
+
+## Bundled skill and model tool
+
+Beyond the panel, the host half publishes its own guidance for agents and one tool that acts on it.
+
+### `skill-authoring` (embedded skill)
+
+The package ships `skills/skill-authoring/` and registers it with `ctx.skills.registerProvider()`,
+so it appears in the session catalog exactly like the built-in skills — the model can load it with
+the `skill` tool, and the panel lists it as *embedded* (read-only, because the file belongs to the
+package, not to a managed root).
+
+```
+skills/skill-authoring/
+  SKILL.md                        routing + the five-step short path
+  references/roots.md             the root table, ranks, precedence, project-root detection
+  references/frontmatter.md       every field, the boolean spellings, why a skill silently does not load
+  references/resources.md         where resource files go and how the model is told to find them
+  references/plugin-bundled.md    shipping skill content inside a plugin package
+  templates/minimal/SKILL.md      starter bundle
+```
+
+Because the candidate carries `resourceBase: { kind: 'directory', path }`, the loaded skill arrives
+with `Base directory for this skill: <abs path>` in its `<skill_resources>` block, so the agent can
+read `references/*.md` with ordinary file tools. Rank 600 means any project or user skill named
+`skill-authoring` shadows this one — override it by writing your own.
+
+### `skill_create` (model tool)
+
+```
+skill_create({ name, description, whenToUse?, body?, root?, resources?, modelInvocable?, userInvocable?, overwrite? })
+```
+
+| Argument | Meaning |
+|---|---|
+| `name` | kebab-case skill name; also the bundle directory name |
+| `description` | frontmatter description — the only routing signal the catalog shows |
+| `whenToUse` | optional `whenToUse` frontmatter field |
+| `body` | the Markdown after the frontmatter; defaults to a `# <name>` heading |
+| `root` | `project-dsh` \| `project-agents` \| `user-dsh` \| `user-agents`; defaults to `user-agents` |
+| `resources` | `[{ path, content }]` written inside the same bundle directory (e.g. `references/roots.md`) |
+| `modelInvocable` / `userInvocable` | `false` writes `disable-model-invocation: true` / `user-invocable: false` |
+| `overwrite` | required to replace an existing skill; the default fails instead of clobbering |
+
+It exists because of a real obstacle: the file-write tools are sandboxed to the session workspace,
+while `$DSH_HOME/skills` and `$DSH_AGENTS_HOME/skills` are not in it, so an agent asked to "make me
+a skill" could only fail there. The tool writes with the same confinement as the panel — only the
+four managed roots, only inside `<root>/<name>/` — and rejects absolute resource paths, `..`
+segments, a resource that would overwrite `SKILL.md`, and a name that collides with an embedded
+skill. It registers through `ctx.inject(['tools'], …)`, so a composition without `ctx.tools` simply
+loses the tool instead of failing to mount.
+
+> [!NOTE]
+> The tool is registered globally, so **every agent on the host sees `skill_create`** (one extra
+> tool schema in the prompt). Removing the plugin removes it; there is no switch.
 
 ## Requirements
 
@@ -67,7 +124,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.2" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.0" }
 }
 ```
 
@@ -138,7 +195,7 @@ The host half mounts a **loopback-only** route at `/dsh-skill-center/api`:
 | GET | `list` | `sessionId?` `cwd?` | skill catalog + read metadata |
 | POST | `read` | `name` | raw `SKILL.md` text |
 | POST | `setInvocation` | `name` `modelInvocable?` `userInvocable?` | rewrite invocation policy |
-| POST | `create` | `name` `description` `body?` `rootId?` | create a skill bundle |
+| POST | `create` | `name` `description` `body?` `rootId?` `whenToUse?` `resources?` `overwrite?` `modelInvocable?` `userInvocable?` | create (or, with `overwrite`, replace) a skill bundle and its resource files; shares one implementation with `skill_create` |
 | POST | `delete` | `name` | move to `.trash` |
 
 Requests from anything other than `127.0.0.1` / `::1` are rejected with `403`.
@@ -175,6 +232,12 @@ Two halves, no shared imports:
 - Frontmatter edits are string-level: only the invocation keys are touched, everything else is preserved
   byte for byte, including line-ending style.
 - Delete is a `rename` into `.trash`.
+- Also registers an embedded skill provider (`ctx.skills.registerProvider`) for `skills/skill-authoring/`
+  and the `skill_create` tool (`ctx.inject(['tools'], …)` + `ctx.tools.register`). The tool schema is a
+  hand-written JSON Schema using only the subset `@deepseek-ai/dsh-tools` accepts, so the package keeps
+  zero runtime dependencies and needs no host-side module resolution.
+- The three parts degrade independently: a missing `tools` or `webServer` service, or a bundled-skill
+  asset that fails to parse, only logs a warning and leaves the rest mounted.
 
 **Browser half** — [`client/client.js`](client/client.js)
 
@@ -216,7 +279,8 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_m
   -Target "D:\path\to\dsh-skill-center"
 ```
 
-Self-checks (both run against the local host route with a mini React shim):
+Self-checks (the first two run against the local host route with a mini React shim; the third is
+fully offline):
 
 ```powershell
 $env:ELECTRON_RUN_AS_NODE = 1
@@ -224,7 +288,17 @@ $exe  = "C:\path\to\DeepSeek Harness.exe"
 $here = "D:\path\to\dsh-skill-center"
 $env:DSH_SMOKE_SESSION = "<session-id>"; & $exe "$here\client-smoke.mjs"   # client half + real loopback route
 & $exe "$here\verify-compose.mjs"                                          # client half accepted by the module graph
+node "$here\verify-skill.mjs"                                              # bundled skill + skill_create, offline
 ```
+
+`verify-compose.mjs` must run through the Electron binary: it reads the shipped `@deepseek-ai`
+packages out of `app.asar`, which plain `node` cannot open. `verify-skill.mjs` is the opposite — it
+imports `lib/index.js` with a stub context and needs no host at all. It checks the bundled skill's
+contract (directory name vs frontmatter, non-empty description, `resourceBase` directory, every
+`references/`-style path cited in a table or link actually existing), the tool's JSON Schema against
+the subset `@deepseek-ai/dsh-tools` accepts, and then **really runs** `skill_create` inside a temp
+dir: create, resource placement, overwrite, duplicate names, illegal names, path traversal, flat
+files, explicit project roots, and the three degraded mount paths.
 
 > Renaming or relocating the package: the client module table caches package metadata by
 > `(loader baseUrl, loader line name)` — no file timestamps — so a running host keeps the old path.
@@ -241,6 +315,11 @@ $env:DSH_SMOKE_SESSION = "<session-id>"; & $exe "$here\client-smoke.mjs"   # cli
   embedded skills plus that cwd's project skills; the footer shows the effective cwd and scope tier.
 - Catalog replacement is all-or-nothing: one switch change makes the host resend the whole skill
   catalog message (a Harness design choice, not this plugin's).
+- `skill_create` is registered host-wide, so every agent sees one more tool schema; it has no
+  per-agent switch, and only uninstalling the plugin removes it.
+- The bundled `skill-authoring` skill is embedded and therefore read-only in the panel. Because it
+  sits at rank 600, a project or user skill with the same name replaces it entirely — that is the
+  intended way to customize it.
 
 ## License
 
@@ -268,7 +347,56 @@ $env:DSH_SMOKE_SESSION = "<session-id>"; & $exe "$here\client-smoke.mjs"   # cli
 | 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md` |
 | 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（可手工恢复，不硬删） |
 | 只读保护 | 插件内嵌技能（如 `office-docx`、`diagnose-windows-sandbox-acl`）标注「内嵌」，开关与删除按钮禁用 |
+| 随包技能 | 附带一个内嵌的 **`skill-authoring`** 指导技能（正文 + `references/` + 起步模板）：技能该放哪个根、frontmatter 契约是什么、资源文件放哪、怎么把技能打进插件包 |
+| 模型工具 | 注册 **`skill_create`**：一次调用写出 `<root>/<name>/SKILL.md` 与全部资源文件 —— 技能根在工作区之外时（文件写入工具被沙箱挡住）这是唯一走得通的路径 |
 | 安全 | 写操作只落在**真实存在于磁盘**的受管技能根内；非回环来源一律 `403` |
+
+### 随包技能与模型工具
+
+除了面板，宿主半边还会给 Agent 发一份指导技能和一个真正能动手的工具。
+
+**`skill-authoring`（内嵌技能）**：包内 `skills/skill-authoring/` 通过
+`ctx.skills.registerProvider()` 注册，和第一方内嵌技能一样出现在会话技能目录里 ——
+模型可以用 `skill` 工具加载它，面板把它标成「内嵌」（只读，因为它属于包，不属于受管根）。
+
+```
+skills/skill-authoring/
+  SKILL.md                        路由 + 五步短路径
+  references/roots.md             根表、rank、优先级、项目根判定
+  references/frontmatter.md       每个字段、布尔写法、为什么技能会静默不加载
+  references/resources.md         资源文件放哪、模型怎么被告知去找
+  references/plugin-bundled.md    把技能打进插件包的两种注册方式
+  templates/minimal/SKILL.md      起步模板
+```
+
+候选带上 `resourceBase: { kind: 'directory', path }` 之后，加载出来的
+`<skill_resources>` 里会写明 `Base directory for this skill: <绝对路径>`，
+Agent 因此能用普通文件工具去读 `references/*.md`。rank 600 意味着任何项目级/用户级同名技能都能盖过它 ——
+想改写它就自己建一个同名技能。
+
+**`skill_create`（模型工具）**：
+
+| 参数 | 含义 |
+|---|---|
+| `name` | kebab-case 技能名，同时是目录名 |
+| `description` | frontmatter 的 description：目录里唯一的路由信号 |
+| `whenToUse` | 可选，写进 frontmatter |
+| `body` | frontmatter 之后的 Markdown 正文；省略则写一个 `# <name>` 标题 |
+| `root` | `project-dsh` / `project-agents` / `user-dsh` / `user-agents`，默认 `user-agents` |
+| `resources` | `[{ path, content }]`，写进同一个技能目录（如 `references/roots.md`） |
+| `modelInvocable` / `userInvocable` | 传 `false` 分别写 `disable-model-invocation: true` / `user-invocable: false` |
+| `overwrite` | 覆盖已存在的技能必须显式传，默认宁可失败也不覆盖 |
+
+它存在的理由很具体：文件写入工具被沙箱限制在会话工作区内，而 `$DSH_HOME/skills`、
+`$DSH_AGENTS_HOME/skills` 不在工作区里 —— 用户说「给我做个技能」时，Agent 在那里根本写不进去。
+这个工具用的是和面板同一套落盘实现：只写四个受管根、只写 `<root>/<name>/` 之内，
+并拒绝绝对资源路径、`..` 段、会覆盖 `SKILL.md` 的资源，以及与内嵌技能重名。
+它通过 `ctx.inject(['tools'], …)` 注册，所以没有 `ctx.tools` 的组合只是少这个工具，不会挂不上。
+
+> [!NOTE]
+> 工具是**宿主级全局注册**：同一宿主上每个 Agent 都会多看到 `skill_create`（多一份工具 schema）。
+> 没有开关，卸载插件才会消失。
+
 
 ### 安装
 
@@ -286,7 +414,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.2" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.0" }
 }
 ```
 
@@ -342,6 +470,12 @@ pnpm add @restregular/dsh-skill-center
   `<projectRoot>/.dsh/skills`、`<projectRoot>/.agents/skills`、`$DSH_HOME/skills`、`$DSH_AGENTS_HOME/skills`。
 - frontmatter 改写是字符串级编辑，只动与调用策略相关的键，其余逐字保留（含行尾风格）。
 - 删除只 rename 进 `.trash`。
+- 另注册一个内嵌技能提供方（`ctx.skills.registerProvider`，指向包内 `skills/skill-authoring/`）
+  和 `skill_create` 工具（`ctx.inject(['tools'], …)` + `ctx.tools.register`）。
+  工具 schema 是手写的原始 JSON Schema，只使用 `@deepseek-ai/dsh-tools` 接受的子集 ——
+  本包因此保持零运行时依赖，也不需要宿主侧的模块解析。
+- 三块各自独立降级：缺 `tools` / `webServer`，或者随包技能的资产解析失败，
+  都只写一行日志，其余部分照常挂载。
 
 **浏览器半边**（`client/client.js`）注册两处槽位，不 require 任何 Harness Client 包：
 
@@ -373,6 +507,9 @@ Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19387/dsh-skill-center/api
 
 非回环来源一律 403。
 
+`create` 与模型工具 `skill_create` 共用一份实现：除 `name` / `description` / `body` / `rootId` 外，
+还接受 `whenToUse`、`resources: [{ path, content }]`、`overwrite`、`modelInvocable`、`userInvocable`。
+
 ### 开发
 
 | 改动 | 生效方式 |
@@ -390,7 +527,17 @@ $exe = "C:\path\to\DeepSeek Harness.exe"; $here = "D:\path\to\dsh-skill-center"
 $env:DSH_SMOKE_SESSION = "<session-id>"; & $exe "$here\client-smoke.mjs"
 # 客户端半侧是否会被浏览器模块图接受(复现 dsh-client-modules 的合成校验)
 & $exe "$here\verify-compose.mjs"
+# 随包技能 + skill_create:纯离线,不碰宿主也不碰真实用户技能根
+node "$here\verify-skill.mjs"
 ```
+
+`verify-compose.mjs` 必须用 Electron 可执行文件跑:它要读 app.asar 里随发行版交付的
+`@deepseek-ai` 包,普通 `node` 打不开 asar。`verify-skill.mjs` 正好相反 ——
+它用桩 ctx 直接 import `lib/index.js`,完全不需要宿主:检查随包技能契约
+（目录名 vs frontmatter、description 非空、`resourceBase` 目录真实存在、正文表格/链接里点到的
+`references/` 等路径是否真的存在）、检查工具 schema 是否落在 `@deepseek-ai/dsh-tools` 支持的子集内,
+然后**真的跑一遍** `skill_create`:新建、资源落盘、覆盖、重名、非法名、路径穿越、平坦文件、
+显式项目根,以及三条降级路径。
 
 > 搬迁/改名注意：客户端模块表按 `(loader baseUrl, loader 行名)` 缓存包元信息，不含文件时间戳。
 > 把包挪到别处后，运行中的宿主仍握着旧路径；浏览器端用的是激活时读进内存的快照，
@@ -404,6 +551,10 @@ $env:DSH_SMOKE_SESSION = "<session-id>"; & $exe "$here\client-smoke.mjs"
 - 没有选中会话时退化为「按工作目录读取」，此时只能看到内嵌技能 + 该 cwd 的项目技能；
   面板底栏会显示实际使用的 cwd 与作用域级别。
 - 目录整体替换制：一次开关改动会让模型的技能目录消息整条重发（这是 Harness 自身的设计）。
+- `skill_create` 是宿主级全局注册：每个 Agent 都会多看到一份工具 schema，没有按 Agent 的开关，
+  只有卸载插件才会消失。
+- 随包 `skill-authoring` 是内嵌技能，面板里只读。它排在 rank 600，所以同名项目级/用户级技能会
+  整体盖过它 —— 这正是定制它的正道。
 
 ### 许可
 
