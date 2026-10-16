@@ -83,6 +83,9 @@ window.__ModuleLoader__.load({
         noBody: '(正文为空)',
         created: '已创建',
         saved: '已保存',
+        unmodified: '未修改',
+        save: '保存',
+        saveHint: '把改动写回 SKILL.md 的 frontmatter',
         back: '返回会话',
         retry: '重试',
         modelOff: '模型关闭',
@@ -132,6 +135,9 @@ window.__ModuleLoader__.load({
         noBody: '(empty body)',
         created: 'Created',
         saved: 'Saved',
+        unmodified: 'Unmodified',
+        save: 'Save',
+        saveHint: 'Write the changes back into the SKILL.md frontmatter',
         back: 'Back to session',
         retry: 'Retry',
         modelOff: 'model off',
@@ -389,6 +395,17 @@ window.__ModuleLoader__.load({
         const [body, setBody] = React.useState(undefined);
         const [pendingDelete, setPendingDelete] = React.useState(false);
         const [creating, setCreating] = React.useState(false);
+        /** 已点开关、还没点"保存"的改动:技能名 → 部分调用策略。 */
+        const [pendingEdits, setPendingEdits] = React.useState({});
+        /**
+         * 面板显示值(技能名 → 部分调用策略),覆盖目录快照里的同名字段。
+         * 为什么要本地留存:宿主的技能目录是**缓存**的,写盘之后 chokidar 失效
+         * 事件到达前那次 `list` 仍是旧值 —— 只信快照的话,刚点完开关的界面会
+         * 自己弹回去(这正是"点了 toggle 不切换、手动刷新才切换"的原因)。
+         */
+        const [shownEdits, setShownEdits] = React.useState({});
+        /** 本次进入面板后是否保存过:决定按钮显示"未修改"还是"已保存"。 */
+        const [savedOnce, setSavedOnce] = React.useState(false);
 
         const load = React.useCallback(async () => {
           setBusy(true);
@@ -397,6 +414,29 @@ window.__ModuleLoader__.load({
             const payload = await apiGet('list', pickScope(sessions, scopeCache));
             setCatalog(payload);
             setSelected((previous) => previous ?? payload.skills[0]?.name);
+            // 快照已经追平本地面板值的字段就地撤销覆盖,覆盖集合只留"宿主还没追上"的部分。
+            setShownEdits((previous) => {
+              const next = {};
+              let changed = false;
+              for (const [name, patch] of Object.entries(previous)) {
+                const skill = payload.skills.find((candidate) => candidate.name === name);
+                if (skill === undefined) { changed = true; continue; }
+                const fresh = {
+                  modelInvocable: skill.modelInvocable !== false,
+                  userInvocable: skill.userInvocable !== false,
+                };
+                const keep = {};
+                if (patch.modelInvocable !== undefined && patch.modelInvocable !== fresh.modelInvocable) {
+                  keep.modelInvocable = patch.modelInvocable;
+                }
+                if (patch.userInvocable !== undefined && patch.userInvocable !== fresh.userInvocable) {
+                  keep.userInvocable = patch.userInvocable;
+                }
+                if (Object.keys(keep).length > 0) next[name] = keep;
+                else changed = true;
+              }
+              return changed ? next : previous;
+            });
           } catch (cause) {
             setError(String(cause?.message ?? cause));
           } finally {
@@ -423,7 +463,7 @@ window.__ModuleLoader__.load({
         /**
          * 跑一个写操作,然后重读目录。
          * @param action - 返回 Promise 的动作。
-         * @param okMessage - 成功提示。
+         * @param okMessage - 成功提示;不传就不显示绿色提示条。
          */
         const mutate = async (action, okMessage) => {
           setBusy(true);
@@ -440,16 +480,77 @@ window.__ModuleLoader__.load({
           }
         };
 
-        const setInvocation = (skill, patch) => mutate(
-          () => apiPost({
-            op: 'setInvocation',
-            ...pickScope(sessions, scopeCache),
-            name: skill.name,
-            modelInvocable: patch.modelInvocable ?? skill.modelInvocable,
-            userInvocable: patch.userInvocable ?? skill.userInvocable,
-          }),
-          t('saved'),
-        );
+        /**
+         * 一个技能此刻该显示的调用策略:本地改动优先,其次目录快照。
+         * @param skill - 目录条目。
+         * @returns `{ modelInvocable, userInvocable }`。
+         */
+        const shownInvocation = (skill) => {
+          const local = shownEdits[skill.name] ?? {};
+          return {
+            modelInvocable: local.modelInvocable ?? (skill.modelInvocable !== false),
+            userInvocable: local.userInvocable ?? (skill.userInvocable !== false),
+          };
+        };
+
+        /**
+         * 拨一个开关:只改本地状态,界面立刻反映,写盘交给"保存"。
+         * @param skill - 目录条目。
+         * @param patch - 本次改动的字段。
+         */
+        const editInvocation = (skill, patch) => {
+          setShownEdits((previous) => ({
+            ...previous,
+            [skill.name]: { ...(previous[skill.name] ?? {}), ...patch },
+          }));
+          setPendingEdits((previous) => ({
+            ...previous,
+            [skill.name]: { ...(previous[skill.name] ?? {}), ...patch },
+          }));
+          setSavedOnce(false);
+          setError(undefined);
+          setNotice(undefined);
+        };
+
+        /**
+         * 保存全部未保存的调用策略改动:逐个 POST,然后重读目录。
+         * 重读拿到的可能仍是旧快照(目录缓存),所以显示值继续由 shownEdits 兜住,
+         * 直到快照追平 —— 撤销覆盖的逻辑在 load() 里。
+         */
+        const saveEdits = async () => {
+          const entries = Object.entries(pendingEdits);
+          if (entries.length === 0) return;
+          setBusy(true);
+          setError(undefined);
+          setNotice(undefined);
+          try {
+            for (const [name, patch] of entries) {
+              const skill = skills.find((candidate) => candidate.name === name);
+              if (skill === undefined) continue;
+              const target = { ...shownInvocation(skill), ...patch };
+              await apiPost({
+                op: 'setInvocation',
+                ...pickScope(sessions, scopeCache),
+                name,
+                modelInvocable: target.modelInvocable,
+                userInvocable: target.userInvocable,
+              });
+            }
+            setPendingEdits({});
+            setSavedOnce(true);
+            await load();
+          } catch (cause) {
+            setError(String(cause?.message ?? cause));
+          } finally {
+            setBusy(false);
+          }
+        };
+
+        /** 有多少个技能带着未保存的改动。 */
+        const pendingCount = Object.keys(pendingEdits).length;
+        const saveLabel = pendingCount === 0
+          ? (savedOnce ? t('saved') : t('unmodified'))
+          : pendingCount === 1 ? t('save') : `${t('save')} (${pendingCount})`;
 
         const removeSkill = (skill) => mutate(
           async () => {
@@ -457,6 +558,18 @@ window.__ModuleLoader__.load({
             setSelected(undefined);
             setBody(undefined);
             setPendingDelete(false);
+            setPendingEdits((previous) => {
+              if (!(skill.name in previous)) return previous;
+              const next = { ...previous };
+              delete next[skill.name];
+              return next;
+            });
+            setShownEdits((previous) => {
+              if (!(skill.name in previous)) return previous;
+              const next = { ...previous };
+              delete next[skill.name];
+              return next;
+            });
           },
           t('deleted'),
         );
@@ -481,6 +594,14 @@ window.__ModuleLoader__.load({
               ? t('subtitle')
               : `${t('total', { n: skills.length })} · ${scopeText}`),
             h('span', { className: 'dsh-sc-spacer', key: 'sp' }),
+            h('button', {
+              key: 'save',
+              type: 'button',
+              className: `dsh-sc-btn${pendingCount > 0 ? ' dsh-sc-btn-primary' : ''}`,
+              disabled: busy || pendingCount === 0,
+              title: t('saveHint'),
+              onClick: saveEdits,
+            }, saveLabel),
             h('button', {
               key: 'back',
               type: 'button',
@@ -579,19 +700,19 @@ window.__ModuleLoader__.load({
             h('div', { key: 'sw', className: 'dsh-sc-section' }, [
               h(Switch, {
                 key: 'model',
-                checked: current.modelInvocable !== false,
+                checked: shownInvocation(current).modelInvocable,
                 disabled: busy || current.writable !== true,
                 label: t('model'),
                 hint: t('modelHint'),
-                onChange: (value) => setInvocation(current, { modelInvocable: value }),
+                onChange: (value) => editInvocation(current, { modelInvocable: value }),
               }),
               h(Switch, {
                 key: 'user',
-                checked: current.userInvocable !== false,
+                checked: shownInvocation(current).userInvocable,
                 disabled: busy || current.writable !== true,
                 label: t('user'),
                 hint: t('userHint'),
-                onChange: (value) => setInvocation(current, { userInvocable: value }),
+                onChange: (value) => editInvocation(current, { userInvocable: value }),
               }),
             ]),
             current.writable !== true

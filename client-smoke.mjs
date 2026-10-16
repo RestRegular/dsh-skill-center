@@ -89,14 +89,16 @@ function sameDeps(a, b) {
  * 渲染一棵元素树;函数组件按路径缓存 hook 实例。
  * @param element - 元素/文本。
  * @param path - 位置路径(实例身份)。
+ * @param seen - 传入数组时,收集本轮渲染访问到的每个元素(供交互测试按 props 找按钮)。
  * @returns 渲染后的文本内容。
  */
-function renderTree(element, path = '0') {
+function renderTree(element, path = '0', seen = null) {
   if (element === null || element === undefined || element === false || element === true) return [];
   if (typeof element === 'string' || typeof element === 'number') return [String(element)];
-  if (Array.isArray(element)) return element.flatMap((child, index) => renderTree(child, `${path}.${index}`));
+  if (Array.isArray(element)) return element.flatMap((child, index) => renderTree(child, `${path}.${index}`, seen));
   if (!element.$$element) return [String(element)];
   const { type, props } = element;
+  if (seen !== null) seen.push({ element, path });
   if (typeof type === 'function') {
     let inst = instances.get(path);
     if (inst === undefined) {
@@ -113,7 +115,7 @@ function renderTree(element, path = '0') {
     } finally {
       rendering = saved;
     }
-    const children = renderTree(output, path);
+    const children = renderTree(output, path, seen);
     // 渲染完成后再跑本轮 effect
     for (const item of inst.pending) {
       const previous = inst.effects.get(item.key);
@@ -130,7 +132,7 @@ function renderTree(element, path = '0') {
     }
     return children;
   }
-  return renderTree(props.children, `${path}.c`);
+  return renderTree(props.children, `${path}.c`, seen);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +318,94 @@ check('列出内嵌技能 office-docx', flat.includes('office-docx'));
 check('列出内嵌技能 diagnose-windows-sandbox-acl', flat.includes('diagnose-windows-sandbox-acl'));
 check('显示了作用域说明', flat.includes('会话作用域') || flat.includes('工作目录'));
 check('没有出现错误提示', !flat.includes('操作失败') && !flat.includes('HTTP '));
+
+// ---------------------------------------------------------------------------
+// 保存按钮流程(toggle 即时生效 / 保存按钮三态 / 保存后不被旧快照弹回)
+//
+// 只拦 POST:GET list 打真实宿主,POST setInvocation 走假响应 —— 冒烟测试绝不
+// 改写真实技能的 frontmatter。宿主目录是缓存的,保存后那次真实 GET 仍会返回旧值,
+// 恰好复现"点完开关界面弹回去"的现场;面板必须靠本地显示值兜住。
+// ---------------------------------------------------------------------------
+console.log(`\n== 保存按钮流程 ==`);
+
+const realFetch = globalThis.fetch;
+const posts = [];
+globalThis.fetch = async (input, init) => {
+  if (init?.method === 'POST') {
+    const body = JSON.parse(init.body);
+    posts.push(body);
+    if (body.op === 'setInvocation') {
+      return { ok: true, status: 200, json: async () => ({ ok: true, name: body.name, changed: true }) };
+    }
+  }
+  return realFetch(input, init);
+};
+
+const t = (key, params) => {
+  let value = dictZH[key] ?? key;
+  if (params) for (const [k, v] of Object.entries(params)) value = value.split(`{${k}}`).join(String(v));
+  return value;
+};
+
+/** 渲染若干轮(每轮 60ms,让 fetch 与 setState 结算),返回文本与元素快照。 */
+async function renderRounds(rounds = 8) {
+  let text = [];
+  let seen = [];
+  for (let round = 0; round < rounds; round++) {
+    scheduled = false;
+    seen = [];
+    text = renderTree(React.createElement(Page, { t }), '0', seen);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  return { text: text.join(' '), seen };
+}
+/** 按 props 找一个按钮元素。 */
+const findButton = (seen, predicate) => seen.find(({ element }) => element.type === 'button' && predicate(element.props));
+/** 保存按钮:用 title(saveHint)认出来,标签就是它的文案。 */
+const saveButton = (seen) => seen.find(({ element }) => element.type === 'button' && element.props.title === dictZH.saveHint);
+/** 模型调用开关(role=switch 的那个按钮)。 */
+const modelSwitch = (seen) => seen.find(({ element }) => element.type === 'button' && element.props.role === 'switch' && element.props['aria-label'] === dictZH.model);
+
+let round = await renderRounds();
+check('快照里找到了 auth0-quickstart(用户根技能)', round.text.includes('auth0-quickstart'), round.text.slice(0, 120));
+const heading = round.seen.find(({ element }) => element.type === 'h2' && element.props.className === 'dsh-sc-h2');
+const selectedSkill = String(heading?.element.props.children ?? '');
+check('详情区显示了当前选中的技能', selectedSkill.length > 0, selectedSkill);
+const save0 = saveButton(round.seen);
+check('初始保存按钮显示「未修改」且置灰', save0?.element.props.children === dictZH.unmodified && save0?.element.props.disabled === true, String(save0?.element.props.children));
+const sw0 = modelSwitch(round.seen);
+check('模型开关初始为开且可点', sw0?.element.props['aria-checked'] === true && sw0?.element.props.disabled === false, `checked=${String(sw0?.element.props['aria-checked'])} disabled=${String(sw0?.element.props.disabled)}`);
+
+// 拨开关:界面必须立刻反映,且这一次点击不产生任何写请求。
+const postsBefore = posts.length;
+await sw0.element.props.onClick();
+const afterToggle = await renderRounds(2);
+const sw1 = modelSwitch(afterToggle.seen);
+const save1 = saveButton(afterToggle.seen);
+check('拨开关后开关立即切换(无需刷新)', sw1?.element.props['aria-checked'] === false, String(sw1?.element.props['aria-checked']));
+check('拨开关本身不发写请求', posts.length === postsBefore, JSON.stringify(posts.slice(postsBefore)));
+check('拨开关后按钮变成可点的「保存」', save1?.element.props.children === dictZH.save && save1?.element.props.disabled === false, `${String(save1?.element.props.children)} disabled=${String(save1?.element.props.disabled)}`);
+
+// 点保存:发出 setInvocation,按钮转为置灰的「已保存」,且开关仍是用户拨到的值。
+await save1.element.props.onClick();
+const afterSave = await renderRounds(8);
+const sw2 = modelSwitch(afterSave.seen);
+const save2 = saveButton(afterSave.seen);
+const invocationPosts = posts.filter((body) => body.op === 'setInvocation');
+check('保存对目标技能发出一次 setInvocation', invocationPosts.length === 1 && invocationPosts[0].name === selectedSkill, JSON.stringify(invocationPosts));
+check('保存带上两个策略字段(宿主按两者改写 frontmatter)', invocationPosts[0]?.modelInvocable === false && invocationPosts[0]?.userInvocable === true, JSON.stringify(invocationPosts[0]));
+check('保存后按钮变成置灰的「已保存」', save2?.element.props.children === dictZH.saved && save2?.element.props.disabled === true, `${String(save2?.element.props.children)} disabled=${String(save2?.element.props.disabled)}`);
+check('保存后开关保持用户拨到的值(不被旧快照弹回)', sw2?.element.props['aria-checked'] === false, String(sw2?.element.props['aria-checked']));
+const greenNotes = afterSave.seen.filter(({ element }) => typeof element.props.className === 'string' && element.props.className.includes('dsh-sc-note-ok'));
+check('保存后不再出现绿色提示条', greenNotes.length === 0, String(greenNotes.length));
+
+// 再改一次:按钮必须回到可点的「保存」。
+await sw2.element.props.onClick();
+const afterSecond = await renderRounds(2);
+const save3 = saveButton(afterSecond.seen);
+check('再次修改后按钮重新变成「保存」', save3?.element.props.children === dictZH.save && save3?.element.props.disabled === false, `${String(save3?.element.props.children)} disabled=${String(save3?.element.props.disabled)}`);
+
+globalThis.fetch = realFetch;
 
 console.log(`\n== 清理 effect ==`);
 for (const effect of effects) {

@@ -154,7 +154,11 @@ function createHarness(options = {}) {
   const service = {
     skills,
     logger: { warn: (message) => state.warnings.push(String(message)) },
-    get: (key) => (key === 'skills' ? skills : undefined),
+    get: (key) => {
+      if (key === 'skills') return skills;
+      if (key === 'clientModules' && options.clientModules !== undefined) return options.clientModules;
+      return undefined;
+    },
     effect(fn) {
       state.effects += 1;
       const disposer = fn();
@@ -381,6 +385,95 @@ try {
   collisionError = String(error?.message ?? error);
 }
 check('与内嵌技能重名时明确拒绝', typeof collisionError === 'string' && collisionError.includes('内嵌'), collisionError);
+
+// ---------------------------------------------------------------------------
+// 3b. 面板读到的调用策略以磁盘为准(目录快照是缓存的,可能是旧值)
+// ---------------------------------------------------------------------------
+
+console.log('\n== 面板数据以磁盘为准 ==');
+const truthDir = join(agentsHome, 'skills', 'disk-truth');
+mkdirSync(truthDir, { recursive: true });
+const truthFile = join(truthDir, 'SKILL.md');
+writeFileSync(truthFile, '---\nname: disk-truth\ndescription: "disk truth"\ndisable-model-invocation: true\nuser-invocable: false\n---\n\n# disk\n');
+const outsideDir = join(sandbox, 'outside-skills', 'outside-truth');
+mkdirSync(outsideDir, { recursive: true });
+const outsideFile = join(outsideDir, 'SKILL.md');
+writeFileSync(outsideFile, '---\nname: outside-truth\ndescription: "outside"\ndisable-model-invocation: true\n---\n\n# outside\n');
+
+const stale = createHarness({
+  catalogSkills: [
+    {
+      name: 'disk-truth',
+      description: 'disk truth',
+      invocation: { modelInvocable: true, userInvocable: true },
+      provider: 'dsh-skill-filesystem',
+      source: 'user-agents',
+      path: truthFile,
+    },
+    {
+      name: 'outside-truth',
+      description: 'outside',
+      invocation: { modelInvocable: true, userInvocable: true },
+      provider: 'dsh-skill-filesystem',
+      source: 'custom',
+      path: outsideFile,
+    },
+  ],
+});
+apply(stale.ctx);
+const staleRoute = stale.state.routes[0];
+const staleRes = { status: 0, body: '', writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
+await staleRoute.handler({
+  method: 'GET',
+  url: `/dsh-skill-center/api?op=list&cwd=${encodeURIComponent(project)}`,
+  socket: { remoteAddress: '127.0.0.1' },
+  on() {},
+}, staleRes);
+check('GET list 正常返回', staleRes.status === 200, `${staleRes.status} ${String(staleRes.body).slice(0, 120)}`);
+const staleSkills = JSON.parse(staleRes.body).skills;
+const diskEntry = staleSkills.find((skill) => skill.name === 'disk-truth');
+const outsideEntry = staleSkills.find((skill) => skill.name === 'outside-truth');
+check(
+  '受管根技能的策略取自磁盘 frontmatter(忽略过期快照)',
+  diskEntry?.modelInvocable === false && diskEntry?.userInvocable === false,
+  JSON.stringify({ model: diskEntry?.modelInvocable, user: diskEntry?.userInvocable }),
+);
+check('受管根技能标为可写', diskEntry?.writable === true);
+check(
+  '受管根之外的技能仍用快照值(不去读盘)',
+  outsideEntry?.modelInvocable === true && outsideEntry?.userInvocable === true && outsideEntry?.writable === false,
+  JSON.stringify({ model: outsideEntry?.modelInvocable, writable: outsideEntry?.writable }),
+);
+
+console.log('\n== diagnose 认得出浏览器半边 ==');
+// 浏览器模块图按包名编号:diagnose 必须按包名找,否则永远报 inGraph:false。
+const diag = createHarness({
+  clientModules: {
+    graph: () => ({
+      rev: 'rev-abc',
+      entries: [{ id: '@restregular/dsh-skill-center', url: '/plugins/@restregular/dsh-skill-center/client.js?rev=rev-abc' }],
+    }),
+  },
+});
+apply(diag.ctx);
+const diagRes = { status: 0, body: '', writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
+await diag.state.routes[0].handler({
+  method: 'GET',
+  url: `/dsh-skill-center/api?op=diagnose&cwd=${encodeURIComponent(project)}`,
+  socket: { remoteAddress: '127.0.0.1' },
+  on() {},
+}, diagRes);
+const diagPayload = JSON.parse(diagRes.body);
+check(
+  '按包名命中模块图条目(inGraph=true)',
+  diagPayload.client.inGraph === true && diagPayload.client.entryId === '@restregular/dsh-skill-center',
+  JSON.stringify(diagPayload.client),
+);
+check(
+  '回报带 rev 的 bundle URL',
+  typeof diagPayload.client.url === 'string' && diagPayload.client.url.includes('rev=rev-abc'),
+  String(diagPayload.client.url),
+);
 
 // ---------------------------------------------------------------------------
 // 4. 降级:任何一块缺服务/失败都不该炸宿主

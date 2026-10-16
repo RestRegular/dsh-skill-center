@@ -35,7 +35,7 @@ Sidebar                                   Main area
 | Browse | Lists every skill visible in the **current session scope**, including skills embedded in plugins, each with provider, source root and invocation policy |
 | Search / filter | Search by name or description; filter by provider source |
 | Read body | Renders the raw `SKILL.md` Markdown inside the panel (no right-hand resource pane needed) |
-| Invocation switches | Toggles `disable-model-invocation` / `user-invocable` by rewriting the frontmatter; the host pushes the refreshed catalog to the model immediately |
+| Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
 | Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root |
 | Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete |
 | Read-only guard | Skills embedded in plugins (e.g. `office-docx`) are labelled *embedded* and their switches/deletion are disabled |
@@ -124,7 +124,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.0" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.1" }
 }
 ```
 
@@ -137,7 +137,7 @@ because the client registers `sidebar.panellist` with `order: 1`.
 > (`@restregular/dsh-skill-center`). `@deepseek-ai/dsh-client-modules` locates a row's
 > `package.json` by that name and compares it strictly (`nearestPackage`). With a bare
 > `dsh-skill-center` the host half still mounts, but the client half is dropped **silently**:
-> no sidebar row, `/plugins/@restregular/dsh-skill-center/client.js` returns `404`, and nothing is
+> no sidebar row, `op=diagnose` reports `client.inGraph: false` with no `client.url`, and nothing is
 > logged. 0.2.1 fixed exactly this; 0.2.0 shipped the bare name.
 
 > [!IMPORTANT]
@@ -169,8 +169,11 @@ Nothing appears in the sidebar after install + restart? Check in this order:
 2. **Did the client half reach the browser module graph?**
    `http://127.0.0.1:19387/dsh-skill-center/api?op=diagnose` — `client.inGraph` must be `true`.
    `false` while `host.mounted` is `true` is the loader-row-name / package-name mismatch above.
-3. **Is the bundle served?** `http://127.0.0.1:19387/plugins/@restregular/dsh-skill-center/client.js`
-   should return JavaScript, not `404`.
+3. **Is the bundle served?** The browser is only ever handed a **revisioned** URL
+   (`/plugins/@restregular/dsh-skill-center/client.js?rev=<12 hex>`), and the route deliberately rejects a
+   mismatched revision, so requesting the bare path answers `404` even on a healthy install. Read
+   `client.url` from `op=diagnose` (it now reports the row it matched in `client.entryId`) and fetch that
+   URL instead.
 4. **Re-run the offline composition check** (no host restart needed):
    `node verify-compose.mjs <profileDir>` — it now fails loudly on a loader row name that cannot be
    resolved back to the package.
@@ -182,7 +185,10 @@ Nothing appears in the sidebar after install + restart? Check in this order:
 1. Open a session (or stay on the home screen — see *Known limits*).
 2. Click **Skill Center** in the sidebar.
 3. Pick a skill on the left; the right pane shows provider, source, path, size and the two invocation switches.
-4. Toggle a switch to rewrite the frontmatter, press **Read body** for the Markdown, or **Create** / **Delete** to manage files.
+4. Flip switches as you like: they move immediately and stay staged in the panel. The button to the left of
+   *Back to session* tracks the state — **未修改** (greyed, nothing staged) → **保存** (active, changes staged;
+   a count appears when several skills are staged) → **已保存** (greyed, written). Editing anything again puts
+   it back to 保存. Press **Read body** for the Markdown, or **Create** / **Delete** to manage files.
 
 ## HTTP API
 
@@ -231,6 +237,10 @@ Two halves, no shared imports:
   `<projectRoot>/.dsh/skills`, `<projectRoot>/.agents/skills`, `$DSH_HOME/skills`, `$DSH_AGENTS_HOME/skills`.
 - Frontmatter edits are string-level: only the invocation keys are touched, everything else is preserved
   byte for byte, including line-ending style.
+- For skills inside a managed root, `list` takes the invocation policy **from the file on disk** instead of
+  the registry snapshot. The skill catalog is cached and the filesystem watcher invalidates it a moment
+  after a write, so a panel that trusted the snapshot would show its own stale value right after a save —
+  which is exactly what made a flipped switch snap back until a manual refresh.
 - Delete is a `rename` into `.trash`.
 - Also registers an embedded skill provider (`ctx.skills.registerProvider`) for `skills/skill-authoring/`
   and the `skill_create` tool (`ctx.inject(['tools'], …)` + `ctx.tools.register`). The tool schema is a
@@ -257,6 +267,11 @@ ctx.slots.inject('main', () => ctx.slots.register({
 Styles use host theme tokens only (`--dsw-alias-*`, `--dsw-radius-*`, `--dsw-focus-ring-*`), and the
 `<style>` tag carries `data-plugin="dsh-skill-center"` so the host's ownerless-style sweep does not
 reclaim it.
+
+Switch edits are staged in component state: the switch reads a local override first and the catalog
+second, and the Save button's three states are derived from the staged set (`pendingEdits`) plus a
+"saved once" flag. After a save the overrides are kept until a fresh catalog actually agrees with them
+(`load()` drops the ones that match), so a lagging host snapshot can never bounce the UI back.
 
 ## Development
 
@@ -298,7 +313,14 @@ contract (directory name vs frontmatter, non-empty description, `resourceBase` d
 `references/`-style path cited in a table or link actually existing), the tool's JSON Schema against
 the subset `@deepseek-ai/dsh-tools` accepts, and then **really runs** `skill_create` inside a temp
 dir: create, resource placement, overwrite, duplicate names, illegal names, path traversal, flat
-files, explicit project roots, and the three degraded mount paths.
+files, explicit project roots, and the three degraded mount paths. It also asserts that a managed-root
+skill's invocation policy comes from the file on disk even when the registry snapshot disagrees.
+
+`client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
+and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
+`setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
+next edit), and a lagging catalog snapshot cannot bounce the switch back. It intercepts POSTs, so the
+run never rewrites a real `SKILL.md`.
 
 > Renaming or relocating the package: the client module table caches package metadata by
 > `(loader baseUrl, loader line name)` — no file timestamps — so a running host keeps the old path.
@@ -355,7 +377,7 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 浏览 | 列出**当前会话作用域**下模型/用户能看到的所有技能（含插件内嵌技能），带提供方、来源根、调用策略 |
 | 搜索 / 筛选 | 按名称或描述搜索；按来源（provider source）筛选 |
 | 查看正文 | 面板内直接读 `SKILL.md` 原文（Markdown 原文，不经过右栏） |
-| 调用开关 | 切换 `disable-model-invocation` / `user-invocable`，直接改写 frontmatter；监听器会立刻把新目录推给模型 |
+| 调用开关 | 开关先改本地状态（**点了立刻切换**，不发请求），再按「返回会话」左边的 **保存** 按钮写回 frontmatter（按钮三态：未修改 → 保存 → 已保存，多个技能待保存时显示「保存 (n)」）；写盘后监听器立刻把新目录推给模型 |
 | 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md` |
 | 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（可手工恢复，不硬删） |
 | 只读保护 | 插件内嵌技能（如 `office-docx`、`diagnose-windows-sandbox-acl`）标注「内嵌」，开关与删除按钮禁用 |
@@ -426,7 +448,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.0" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.1" }
 }
 ```
 
@@ -437,8 +459,8 @@ pnpm add @restregular/dsh-skill-center
 > patch 里那条 loader 行的 `name` **必须逐字等于包名**（`@restregular/dsh-skill-center`）。
 > 宿主 `@deepseek-ai/dsh-client-modules` 是按这个行名去定位该行的 `package.json` 并**严格比对**
 > `name` 的（`nearestPackage`）。写成裸名 `dsh-skill-center` 时：宿主半边照样挂得上，
-> 但浏览器半边会被**静默丢弃** —— 侧栏没有「技能中心」、`/plugins/@restregular/dsh-skill-center/client.js`
-> 返回 `404`，而且日志里一个字都没有。0.2.1 修的就是这个；0.2.0 发出去的是裸名。
+> 但浏览器半边会被**静默丢弃** —— 侧栏没有「技能中心」、`op=diagnose` 里 `client.inGraph` 是 `false`
+> 且没有 `client.url`，而且日志里一个字都没有。0.2.1 修的就是这个；0.2.0 发出去的是裸名。
 
 > [!IMPORTANT]
 > 客户端 bundle 还必须用**包名**注册：`__ModuleLoader__.load({ id: '@restregular/dsh-skill-center' })`，
@@ -465,8 +487,10 @@ pnpm add @restregular/dsh-skill-center
    profile 的 `node_modules`。
 2. **浏览器半边进模块图了吗**：`…/api?op=diagnose` 里的 `client.inGraph` 必须是 `true`。
    若 `host.mounted` 为 `true` 而它是 `false`，就是上面那个「行名 ≠ 包名」。
-3. **bundle 有没有被服务**：`http://127.0.0.1:19387/plugins/@restregular/dsh-skill-center/client.js`
-   应返回 JavaScript 而不是 `404`。
+3. **bundle 有没有被服务**：浏览器只会拿到**带版本号**的地址
+   （`/plugins/@restregular/dsh-skill-center/client.js?rev=<12 位十六进制>`），而路由**故意拒绝**
+   版本不匹配的请求 —— 所以即使一切正常，直接要裸路径也会回 `404`。请从 `op=diagnose` 的
+   `client.url` 取地址（现在它还会在 `client.entryId` 里告诉你命中哪一行），再取那个地址。
 4. **跑离线合成自检**（不用重启宿主）：`node verify-compose.mjs <profileDir>`，
    现在它会因为「行名解析不回本包」直接 FAIL。
 5. `pnpm add` 必须**在 profile 目录里**执行；装到别处（全局 `npm i -g`、别的目录）profile 合成不到。
@@ -481,6 +505,9 @@ pnpm add @restregular/dsh-skill-center
 - 写操作只针对**落在受管技能根里、真实存在于磁盘**的文件：
   `<projectRoot>/.dsh/skills`、`<projectRoot>/.agents/skills`、`$DSH_HOME/skills`、`$DSH_AGENTS_HOME/skills`。
 - frontmatter 改写是字符串级编辑，只动与调用策略相关的键，其余逐字保留（含行尾风格）。
+- 受管根内的技能，`list` 的调用策略**以磁盘上的文件为准**，不照抄注册表快照：技能目录是缓存的，
+  而 watcher 的失效事件总在写盘之后一小会儿才到 —— 只信快照的面板会在刚保存完的瞬间把界面弹回
+  旧值，这正是「拨完开关又自己跳回去、手动刷新才变」的根因。
 - 删除只 rename 进 `.trash`。
 - 另注册一个内嵌技能提供方（`ctx.skills.registerProvider`，指向包内 `skills/skill-authoring/`）
   和 `skill_create` 工具（`ctx.inject(['tools'], …)` + `ctx.tools.register`）。
@@ -504,6 +531,11 @@ ctx.slots.inject('main', () => ctx.slots.register({
 
 样式只用宿主主题令牌 `--dsw-alias-*` / `--dsw-radius-*` / `--dsw-focus-ring-*`，
 `<style>` 带 `data-plugin="dsh-skill-center"`（避免被宿主的无主样式回收误删）。
+
+开关的改动先落在组件状态里：开关的值取「本地覆盖 → 目录快照」的先后顺序，
+保存按钮的三态由「待保存集合 + 是否保存过」推出。保存之后本地覆盖会继续留着，
+直到某次 `list` 的快照真的与它一致（`load()` 只撤销已经追平的那些）——
+所以宿主的目录快照慢半拍也不会把界面弹回去。
 
 ### API 示例
 
@@ -549,7 +581,13 @@ node "$here\verify-skill.mjs"
 （目录名 vs frontmatter、description 非空、`resourceBase` 目录真实存在、正文表格/链接里点到的
 `references/` 等路径是否真的存在）、检查工具 schema 是否落在 `@deepseek-ai/dsh-tools` 支持的子集内,
 然后**真的跑一遍** `skill_create`:新建、资源落盘、覆盖、重名、非法名、路径穿越、平坦文件、
-显式项目根,以及三条降级路径。
+显式项目根,以及三条降级路径;另外还断言：受管根技能的调用策略取自磁盘文件,即使注册表快照
+给的是旧值。
+
+`client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
+拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
+未修改 → 保存 → 已保存 走(再改一次回到保存)、以及宿主目录快照慢半拍也弹不回开关。
+它拦下了所有 POST,所以跑一遍不会改动任何真实 `SKILL.md`。
 
 > 搬迁/改名注意：客户端模块表按 `(loader baseUrl, loader 行名)` 缓存包元信息，不含文件时间戳。
 > 把包挪到别处后，运行中的宿主仍握着旧路径；浏览器端用的是激活时读进内存的快照，
