@@ -148,7 +148,15 @@ const captured = [];
 globalThis.window = {
   location: { origin: ORIGIN },
   __ModuleLoader__: {
-    load(module) { captured.push(module); },
+    // 宿主 facade 的真实形状:注册队列 + 已注册工厂表。
+    factories: new Map(),
+    load(module) {
+      if (this.factories.has(module.id)) {
+        throw new Error(`client-modules: duplicate factory registration for "${module.id}" (bundle executed twice without invalidate?)`);
+      }
+      this.factories.set(module.id, module);
+      captured.push(module);
+    },
   },
 };
 
@@ -176,12 +184,22 @@ const check = (label, condition, detail) => {
 console.log('== 装载 ==');
 check('调用了 __ModuleLoader__.load 一次', captured.length === 1, `got ${captured.length}`);
 const module = captured[0];
-check('模块 id 等于插件 id dsh-skill-center', module.id === 'dsh-skill-center', module.id);
 check(
-  '插件 id 与包名脱钩(包名是 @restregular/dsh-skill-center)',
-  module.id !== '@restregular/dsh-skill-center',
+  '模块 id 逐字等于包名 @restregular/dsh-skill-center(行 id 用它做 HMR 失效)',
+  module.id === '@restregular/dsh-skill-center',
   module.id,
 );
+
+// 回归护栏:同一个 bundle 被执行两次(行 id 与注册 id 不一致时 HMR 清不掉旧工厂)时,
+// 必须安静跳过,而不是抛 duplicate factory registration 把整条 web boot 打挂。
+let secondRunError;
+try {
+  (0, eval)(source);
+} catch (error) {
+  secondRunError = error;
+}
+check('重复执行同一 bundle 不抛异常', secondRunError === undefined, String(secondRunError));
+check('重复执行不产生第二次注册', captured.length === 1, `got ${captured.length}`);
 
 const face = module.factory(mockRequire);
 check('工厂返回 {apply, inject}', typeof face.apply === 'function' && Array.isArray(face.inject), JSON.stringify(face.inject));

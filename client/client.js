@@ -6,11 +6,27 @@
  *      `order: 1` 使其排在 `plugins`(order 0)下方;
  *   2. `main`(keyed, root, key = "skill-center")— 中央区域的面板本体。
  *
+ * 注册 id **必须逐字等于包名**(`@restregular/dsh-skill-center`)。浏览器模块图是按
+ * 包名给行编号的,`ClientModuleSystem.invalidate`/`reload`(HMR 的 `rebuilt` 帧走的
+ * 就是它)只按**行 id** 清理工厂表:注册 id 与行 id 不一致时,旧工厂不会被删掉,
+ * 新版 bundle 一到就撞成
+ * `client-modules: duplicate factory registration ... (bundle executed twice without invalidate?)`,
+ * 于是整条 web boot 变成 "1 entry did not activate"。
+ *
  * 数据与写操作全部走宿主同源回环路由 `/dsh-skill-center/api`(见 ../lib/index.js)。
  * 样式只用宿主主题令牌 `--dsw-*`,不 import 任何 Harness Client 包。
  */
+const MODULE_ID = '@restregular/dsh-skill-center';
+
+/** 该 id 是否已经注册过工厂(宿主 facade 暴露 factories 表;取不到就当作没注册)。 */
+function alreadyRegistered() {
+  const factories = window.__ModuleLoader__?.factories;
+  return factories !== undefined && typeof factories.has === 'function' && factories.has(MODULE_ID);
+}
+
+if (!alreadyRegistered()) {
 window.__ModuleLoader__.load({
-  id: 'dsh-skill-center',
+  id: MODULE_ID,
   factory: (require) => {
     const React = require('react');
     const h = React.createElement;
@@ -765,3 +781,4 @@ window.__ModuleLoader__.load({
     return { apply, inject };
   },
 });
+}

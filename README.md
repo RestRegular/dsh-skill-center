@@ -1,4 +1,4 @@
-# dsh-skill-center · 技能中心
+﻿# dsh-skill-center · 技能中心
 
 [![npm](https://img.shields.io/npm/v/@restregular/dsh-skill-center?color=cb3837&logo=npm)](https://www.npmjs.com/package/@restregular/dsh-skill-center)
 [![license](https://img.shields.io/npm/l/@restregular/dsh-skill-center?color=blue)](./LICENSE)
@@ -67,7 +67,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.1" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.2.2" }
 }
 ```
 
@@ -83,7 +83,24 @@ because the client registers `sidebar.panellist` with `order: 1`.
 > no sidebar row, `/plugins/@restregular/dsh-skill-center/client.js` returns `404`, and nothing is
 > logged. 0.2.1 fixed exactly this; 0.2.0 shipped the bare name.
 
+> [!IMPORTANT]
+> The client bundle must also call `__ModuleLoader__.load({ id: '@restregular/dsh-skill-center' })` —
+> **the package name, not the plugin id**. The browser module graph numbers rows by package name, and
+> `ClientModuleSystem.invalidate(id, rev)` (what the HMR `rebuilt` frame and `entries.reload` use)
+> deletes factory entries **by row id only**. A registration id that differs from the row id leaves
+> the stale factory in place, so the next bundle revision throws
+> `client-modules: duplicate factory registration … (bundle executed twice without invalidate?)`
+> and the whole web boot reports `1 entry did not activate`. 0.2.2 fixed this; 0.2.0/0.2.1 used the
+> bare plugin id. The bundle additionally skips registration when that id is already present, so a
+> double execution can no longer take the boot down.
+
 To uninstall: remove the bundle entry and the dependency, then restart.
+
+> [!WARNING]
+> Do not leave a bare-name junction/link for this package in the profile's `node_modules`
+> (e.g. `node_modules\dsh-skill-center` → the repo). Both the link and the scoped package register
+> the same plugin, which is exactly the two-sources situation behind the duplicate-registration
+> crash. Install the scoped package and nothing else.
 
 ## Troubleshooting
 
@@ -269,7 +286,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.1" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.2.2" }
 }
 ```
 
@@ -283,7 +300,23 @@ pnpm add @restregular/dsh-skill-center
 > 但浏览器半边会被**静默丢弃** —— 侧栏没有「技能中心」、`/plugins/@restregular/dsh-skill-center/client.js`
 > 返回 `404`，而且日志里一个字都没有。0.2.1 修的就是这个；0.2.0 发出去的是裸名。
 
+> [!IMPORTANT]
+> 客户端 bundle 还必须用**包名**注册：`__ModuleLoader__.load({ id: '@restregular/dsh-skill-center' })`，
+> 不能用插件 id `dsh-skill-center`。浏览器模块图是按包名给行编号的，而
+> `ClientModuleSystem.invalidate(id, rev)`（HMR 的 `rebuilt` 帧 → `entries.reload` 走的正是它）
+> **只按行 id** 删工厂表里的条目：注册 id 与行 id 不一致 → 旧工厂删不掉 → 下一版 bundle 一执行就
+> `client-modules: duplicate factory registration … (bundle executed twice without invalidate?)`，
+> 整条 web boot 变成「1 entry did not activate」并弹「应用无法启动或已意外停止」。
+> 0.2.2 修的就是这个。bundle 另外加了一道幂等保护：该 id 已在工厂表里就跳过注册，
+> 重复执行最多是空转，不会再打挂启动。
+
 卸载：删掉上面两处清单项，重启即可。
+
+> [!WARNING]
+> 不要在 profile 的 `node_modules` 里给这个包留裸名链接/junction
+> （例如 `node_modules\dsh-skill-center` → 本仓库）。链接和真正的 scoped 包会各自注册同一个插件，
+> 正好构成「同一插件两个来源」——也就是上面那个 duplicate registration 崩溃的现场。
+> 只装 scoped 包，别的都清掉。
 
 ### 装完侧栏没出现？按顺序查这五步
 

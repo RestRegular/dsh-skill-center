@@ -2,10 +2,11 @@
  * 离线复现 @deepseek-ai/dsh-client-modules 的合成校验:
  * 按 profile 的 dsh.profile.bundles 顺序读各包的 package.json,
  * 检查 dsh.client 声明、exports["./client"]、inject 提供方是否存在、
- * 客户端 bundle 自己注册的 module id 是否是 PLUGIN_ID,以及 **bundle patch 里那条
- * loader 行名能否解析回本包的 package.json**(宿主侧 resolveMeta → nearestPackage
- * 是严格按名字比的)。最后一条是 0.2.1 的回归护栏:行名写成裸名时宿主半边照挂、
- * 浏览器半边被静默丢弃。
+ * 客户端 bundle 自己注册的 module id 是否等于包名(浏览器模块图的行 id,也是 HMR
+ * 失效时用的 key),以及 **bundle patch 里那条 loader 行名能否解析回本包的 package.json**
+ * (宿主侧 resolveMeta → nearestPackage 是严格按名字比的)。这两条都是回归护栏:
+ * 行名写成裸名时宿主半边照挂、浏览器半边被静默丢弃;注册 id 用裸名时,
+ * HMR 的 rebuilt 帧清不掉旧工厂,新版 bundle 一到就报 duplicate factory registration。
  *
  * 用途:在不动宿主进程的前提下确认 dsh-skill-center 的客户端半侧会被
  * 浏览器模块图接受(宿主侧的增量扫描由 loader 挂载事件驱动,见
@@ -21,11 +22,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PACKAGE_NAME = '@restregular/dsh-skill-center';
 /**
- * 客户端 bundle 自己注册的 module id。它**不必**等于包名:`ClientModuleRegistry.register`
- * 只是把注册项按 id 存进工厂表,图的 entry id 才是包名。但注册 id 必须与 bundle 里写死的那个
- * 逐字一致,所以这里把它当成契约核对。
+ * 客户端 bundle 必须用**包名本身**调 `__ModuleLoader__.load({ id })`。
+ * 理由:`ClientModuleSystem.invalidate(id, rev)`(HMR `rebuilt` 帧 → `entries.reload`)
+ * 只按行 id 删工厂表条目,而行 id 就是包名。注册 id 与包名不一致时,旧工厂留在表里,
+ * 新版 bundle 一执行就抛 `duplicate factory registration`,把 web boot 打成
+ * "1 entry did not activate"。
  */
-const PLUGIN_ID = 'dsh-skill-center';
+const MODULE_ID = PACKAGE_NAME;
 
 const profileDir = process.argv[2] ?? 'C:/Users/32280/.dsh/profiles/desktop';
 /** dsh 安装目录:随发行版交付的 bundle 从这里解析(Electron 的 asar 感知 fs 可直读)。 */
@@ -162,11 +165,15 @@ if (mine !== undefined) {
   check('客户端 bundle 文件存在', existsSync(bundleFile), bundleFile);
   if (existsSync(bundleFile)) {
     const source = readFileSync(bundleFile, 'utf8');
-    const idMatch = /__ModuleLoader__\.load\(\{\s*id:\s*'([^']+)'/.exec(source);
+    // 注册 id 可以直接写成字面量,也可以走 `const MODULE_ID = '…'` 再传引用。
+    const idMatch = /__ModuleLoader__\.load\(\{\s*id:\s*(?:'([^']+)'|([A-Za-z_$][\w$]*))/.exec(source);
+    const constantMatch = /const\s+MODULE_ID\s*=\s*'([^']+)'/.exec(source);
+    const registeredId =
+      idMatch?.[1] ?? (idMatch?.[2] === 'MODULE_ID' ? constantMatch?.[1] : idMatch?.[2]);
     check(
-      `bundle 注册的 id 等于 plugin id(PLUGIN_ID)`,
-      idMatch?.[1] === PLUGIN_ID,
-      idMatch?.[1],
+      `bundle 注册的 id 等于包名(行 id,供 HMR invalidate 用): ${MODULE_ID}`,
+      registeredId === MODULE_ID,
+      registeredId,
     );
     check('bundle 导出 apply/inject', /return\s*\{\s*apply,\s*inject\s*\}/.test(source) || /exports\.apply/.test(source));
   }
