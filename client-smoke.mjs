@@ -176,7 +176,12 @@ const check = (label, condition, detail) => {
 console.log('== 装载 ==');
 check('调用了 __ModuleLoader__.load 一次', captured.length === 1, `got ${captured.length}`);
 const module = captured[0];
-check('模块 id 等于包名 dsh-skill-center', module.id === 'dsh-skill-center', module.id);
+check('模块 id 等于插件 id dsh-skill-center', module.id === 'dsh-skill-center', module.id);
+check(
+  '插件 id 与包名脱钩(包名是 @restregular/dsh-skill-center)',
+  module.id !== '@restregular/dsh-skill-center',
+  module.id,
+);
 
 const face = module.factory(mockRequire);
 check('工厂返回 {apply, inject}', typeof face.apply === 'function' && Array.isArray(face.inject), JSON.stringify(face.inject));

@@ -67,7 +67,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.0" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.2.1" }
 }
 ```
 
@@ -75,7 +75,33 @@ The package ships its own `cordis.patch.yml`, so no manual loader edit is requir
 host plugin (`id: skill-center`) and the client half. The sidebar row appears **below Plugins**,
 because the client registers `sidebar.panellist` with `order: 1`.
 
+> [!IMPORTANT]
+> The loader row's `name` **must equal the package name verbatim**
+> (`@restregular/dsh-skill-center`). `@deepseek-ai/dsh-client-modules` locates a row's
+> `package.json` by that name and compares it strictly (`nearestPackage`). With a bare
+> `dsh-skill-center` the host half still mounts, but the client half is dropped **silently**:
+> no sidebar row, `/plugins/@restregular/dsh-skill-center/client.js` returns `404`, and nothing is
+> logged. 0.2.1 fixed exactly this; 0.2.0 shipped the bare name.
+
 To uninstall: remove the bundle entry and the dependency, then restart.
+
+## Troubleshooting
+
+Nothing appears in the sidebar after install + restart? Check in this order:
+
+1. **Is the host half alive?** `http://127.0.0.1:19387/dsh-skill-center/api?op=ping` should answer
+   `{"ok":true,…}`. A `404` means the loader row never mounted — the package is not in the profile's
+   `dsh.profile.bundles`, or is not installed under the profile's `node_modules`.
+2. **Did the client half reach the browser module graph?**
+   `http://127.0.0.1:19387/dsh-skill-center/api?op=diagnose` — `client.inGraph` must be `true`.
+   `false` while `host.mounted` is `true` is the loader-row-name / package-name mismatch above.
+3. **Is the bundle served?** `http://127.0.0.1:19387/plugins/@restregular/dsh-skill-center/client.js`
+   should return JavaScript, not `404`.
+4. **Re-run the offline composition check** (no host restart needed):
+   `node verify-compose.mjs <profileDir>` — it now fails loudly on a loader row name that cannot be
+   resolved back to the package.
+5. `pnpm add` inside the profile is what makes the package resolvable; installing it elsewhere
+   (a global `npm i -g`, an unrelated directory) installs nothing the profile can compose.
 
 ## Usage
 
@@ -243,14 +269,34 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.2.0" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.2.1" }
 }
 ```
 
 包自带 `cordis.patch.yml`，**不需要**手改 loader：它会插入宿主半边（`id: skill-center`）与浏览器半边。
 侧栏那一行排在「插件」下方，因为客户端以 `order: 1` 注册 `sidebar.panellist`。
 
+> [!IMPORTANT]
+> patch 里那条 loader 行的 `name` **必须逐字等于包名**（`@restregular/dsh-skill-center`）。
+> 宿主 `@deepseek-ai/dsh-client-modules` 是按这个行名去定位该行的 `package.json` 并**严格比对**
+> `name` 的（`nearestPackage`）。写成裸名 `dsh-skill-center` 时：宿主半边照样挂得上，
+> 但浏览器半边会被**静默丢弃** —— 侧栏没有「技能中心」、`/plugins/@restregular/dsh-skill-center/client.js`
+> 返回 `404`，而且日志里一个字都没有。0.2.1 修的就是这个；0.2.0 发出去的是裸名。
+
 卸载：删掉上面两处清单项，重启即可。
+
+### 装完侧栏没出现？按顺序查这五步
+
+1. **宿主半边活着吗**：`http://127.0.0.1:19387/dsh-skill-center/api?op=ping` 应回 `{"ok":true,…}`。
+   回 `404` 说明 loader 行压根没挂上 —— 包不在 profile 的 `dsh.profile.bundles` 里，或者没装进
+   profile 的 `node_modules`。
+2. **浏览器半边进模块图了吗**：`…/api?op=diagnose` 里的 `client.inGraph` 必须是 `true`。
+   若 `host.mounted` 为 `true` 而它是 `false`，就是上面那个「行名 ≠ 包名」。
+3. **bundle 有没有被服务**：`http://127.0.0.1:19387/plugins/@restregular/dsh-skill-center/client.js`
+   应返回 JavaScript 而不是 `404`。
+4. **跑离线合成自检**（不用重启宿主）：`node verify-compose.mjs <profileDir>`，
+   现在它会因为「行名解析不回本包」直接 FAIL。
+5. `pnpm add` 必须**在 profile 目录里**执行；装到别处（全局 `npm i -g`、别的目录）profile 合成不到。
 
 ### 它怎么接进 Harness
 

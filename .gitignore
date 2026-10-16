@@ -29,3 +29,7 @@ Thumbs.db
 .npm-manifest.mjs
 .git-credential.ps1
 publish.local.ps1
+
+# local diagnostics / release scratch produced by this machine
+.dsh-probe/
+.acl-recovery/

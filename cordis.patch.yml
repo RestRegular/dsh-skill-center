@@ -1,7 +1,11 @@
 # dsh-skill-center bundle patch: inserts the host plugin (skill catalog API over
 # the loopback Web route /dsh-skill-center) and the client plugin (a 「技能中心」
 # row in the sidebar's global panel list plus its central page).
-# 纯 insert(id/name)可热挂载,免重启。
+#
+# `name` 必须逐字等于本包 package.json 的 name。宿主 @deepseek-ai/dsh-client-modules
+# 是按 **loader 行名 = 包名** 去定位 package.json 的(nearestPackage 严格比对 name):
+# 写成裸名 'dsh-skill-center' 时宿主半边照样挂得上,但客户端半边会被静默丢弃 ——
+# `/plugins/<包名>/client.js` 404、侧栏不出「技能中心」,而且没有任何报错。
 - insert:
     - id: skill-center
-      name: 'dsh-skill-center'
+      name: '@restregular/dsh-skill-center'
