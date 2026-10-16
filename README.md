@@ -305,6 +305,18 @@ files, explicit project roots, and the three degraded mount paths.
 > The browser side uses the in-memory snapshot taken at activation and keeps working after a reload;
 > the new path is only resolved after a host restart.
 
+### Releasing
+
+Bump `version`, commit, push, then `npm publish` from the repo root with a token that has publish
+rights for the scope. The registry answers a successful publish with `202 {"success":true}` and then
+holds the version in a **validating** state: until validation passes, both
+`/@restregular/dsh-skill-center/<version>` and the tarball URL answer `404`, and `dist-tags` still
+points at the previous release. That is the normal window, not a failure. Re-probe the version URL
+with a cache-busting query (`?t=<ticks>`) rather than publishing again: a second attempt for the same
+version fails with `E409 Cannot publish over previously staged version <version>` (and
+`npm stage publish` with `E409 Cannot stage previously published version <version>`), while
+`npm stage list` may show nothing at all.
+
 ## Known limits
 
 - While the panel occupies the main area, the right-hand `dsh-resource://` preview is unavailable
@@ -542,6 +554,16 @@ node "$here\verify-skill.mjs"
 > 搬迁/改名注意：客户端模块表按 `(loader baseUrl, loader 行名)` 缓存包元信息，不含文件时间戳。
 > 把包挪到别处后，运行中的宿主仍握着旧路径；浏览器端用的是激活时读进内存的快照，
 > 所以刷新页面照常可用，**下次重启宿主**才会解析新路径。
+
+### 发版
+
+改 `version` → 提交 → 推送 → 在仓库根用有该 scope 发布权限的 token 执行 `npm publish`。
+注册表对成功的发布回 `202 {"success":true}`，随后该版本进入 **validating** 阶段：验证通过之前，
+`/@restregular/dsh-skill-center/<版本>` 与 tarball 地址都回 `404`，`dist-tags` 仍指向上一个版本。
+这是正常窗口，不是失败。**用带时间戳参数的版本地址重新探测**（`?t=<ticks>`）即可，
+不要重复发布：同一版本再发一次会回
+`E409 Cannot publish over previously staged version <版本>`（`npm stage publish` 则回
+`E409 Cannot stage previously published version <版本>`），而 `npm stage list` 可能什么都不显示。
 
 ### 已知边界
 
