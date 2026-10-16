@@ -1,0 +1,8 @@
+# Source files in this repo are LF-only; normalise on commit and keep LF in the working tree
+# so frontmatter rewrites and diffs stay byte-stable on every platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.tgz binary

@@ -1,0 +1,57 @@
+{
+  "name": "@restregular/dsh-skill-center",
+  "version": "0.1.0",
+  "description": "技能中心 — DeepSeek Harness 技能管理面板：浏览当前会话可见的所有技能、查看正文、开关模型/用户调用、新建与删除。 · Skill Center for DeepSeek Harness: browse and manage the skills visible to the current session.",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "author": "RestRegular",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RestRegular/dsh-skill-center.git"
+  },
+  "homepage": "https://github.com/RestRegular/dsh-skill-center#readme",
+  "bugs": {
+    "url": "https://github.com/RestRegular/dsh-skill-center/issues"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "skills",
+    "skill-center",
+    "agent-skills"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

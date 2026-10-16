@@ -1,0 +1,23 @@
+# dependencies / build output
+node_modules/
+dist/
+*.tgz
+package-lock.json
+pnpm-lock.yaml
+
+# logs & temp
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+
+# local credentials — never commit
+.env
+.env.*
+*.pem
+*.key
+.credentials.yaml

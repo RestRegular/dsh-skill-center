@@ -1,0 +1,7 @@
+# dsh-skill-center bundle patch: inserts the host plugin (skill catalog API over
+# the loopback Web route /dsh-skill-center) and the client plugin (a 「技能中心」
+# row in the sidebar's global panel list plus its central page).
+# 纯 insert(id/name)可热挂载,免重启。
+- insert:
+    - id: skill-center
+      name: 'dsh-skill-center'
