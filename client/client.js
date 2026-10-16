@@ -57,8 +57,8 @@ window.__ModuleLoader__.load({
         formRoot: '写入位置',
         delete: '删除',
         deleteConfirm: '确认删除?',
+        cancel: '取消',
         deleteHint: '删除会把技能移动到同根目录的 .trash 下,可手动恢复。',
-        deleted: '已移动到 .trash',
         preview: '正文',
         previewHide: '收起正文',
         reloadBody: '读取正文',
@@ -81,7 +81,6 @@ window.__ModuleLoader__.load({
         whenToUse: '何时使用',
         internalOnly: '该技能由插件内嵌提供,只能查看,不能改写或删除。',
         noBody: '(正文为空)',
-        created: '已创建',
         saved: '已保存',
         unmodified: '未修改',
         save: '保存',
@@ -109,8 +108,8 @@ window.__ModuleLoader__.load({
         formRoot: 'Write to',
         delete: 'Delete',
         deleteConfirm: 'Confirm delete?',
+        cancel: 'Cancel',
         deleteHint: 'Delete moves the skill into a .trash folder under the same root; restore it by hand.',
-        deleted: 'Moved to .trash',
         preview: 'Body',
         previewHide: 'Hide body',
         reloadBody: 'Load body',
@@ -133,7 +132,6 @@ window.__ModuleLoader__.load({
         whenToUse: 'When to use',
         internalOnly: 'This skill is embedded in a plugin: it can be viewed but not edited or deleted.',
         noBody: '(empty body)',
-        created: 'Created',
         saved: 'Saved',
         unmodified: 'Unmodified',
         save: 'Save',
@@ -225,7 +223,6 @@ window.__ModuleLoader__.load({
 .dsh-sc-note{border-radius:var(--dsw-radius-md,8px);padding:9px 12px;font-size:12px;margin:0 20px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .dsh-sc-note-warn{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary)}
 .dsh-sc-note-err{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-error-primary)}
-.dsh-sc-note-ok{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-success-primary)}
 .dsh-sc-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-bg-layer-2)}
 .dsh-sc-area{min-height:96px;resize:vertical;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:12px}
 .dsh-sc-foot{flex:none;display:flex;gap:10px;align-items:center;padding:7px 20px;border-top:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-caption);font-size:11px}
@@ -388,7 +385,6 @@ window.__ModuleLoader__.load({
         const [catalog, setCatalog] = React.useState(undefined);
         const [error, setError] = React.useState(undefined);
         const [busy, setBusy] = React.useState(false);
-        const [notice, setNotice] = React.useState(undefined);
         const [query, setQuery] = React.useState('');
         const [sourceFilter, setSourceFilter] = React.useState('');
         const [selected, setSelected] = React.useState(undefined);
@@ -461,18 +457,16 @@ window.__ModuleLoader__.load({
             : catalog.tier === 'preset-scope' ? t('scopePreset') : t('scopeLive');
 
         /**
-         * 跑一个写操作,然后重读目录。
+         * 跑一个写操作,然后重读目录。成功不弹任何提示:面板本身的状态变化
+         * (开关、按钮三态、列表增删)就是反馈;失败才写错误条。
          * @param action - 返回 Promise 的动作。
-         * @param okMessage - 成功提示;不传就不显示绿色提示条。
          */
-        const mutate = async (action, okMessage) => {
+        const mutate = async (action) => {
           setBusy(true);
           setError(undefined);
-          setNotice(undefined);
           try {
             await action();
             await load();
-            setNotice(okMessage);
           } catch (cause) {
             setError(String(cause?.message ?? cause));
           } finally {
@@ -509,7 +503,6 @@ window.__ModuleLoader__.load({
           }));
           setSavedOnce(false);
           setError(undefined);
-          setNotice(undefined);
         };
 
         /**
@@ -522,7 +515,6 @@ window.__ModuleLoader__.load({
           if (entries.length === 0) return;
           setBusy(true);
           setError(undefined);
-          setNotice(undefined);
           try {
             for (const [name, patch] of entries) {
               const skill = skills.find((candidate) => candidate.name === name);
@@ -571,7 +563,6 @@ window.__ModuleLoader__.load({
               return next;
             });
           },
-          t('deleted'),
         );
 
         const loadBody = async (skill) => {
@@ -674,7 +665,7 @@ window.__ModuleLoader__.load({
             catalog,
             scopeCache,
             sessions,
-            onDone: (message) => { setCreating(false); setNotice(message); load(); },
+            onDone: () => { setCreating(false); load(); },
             onError: setError,
           });
         } else if (current === undefined) {
@@ -726,6 +717,14 @@ window.__ModuleLoader__.load({
                 disabled: busy || current.writable !== true,
                 onClick: () => { if (body === undefined) loadBody(current); else setBody(undefined); },
               }, body === undefined ? t('reloadBody') : t('previewHide')),
+              // 待确认时,"取消"排在"确认删除?"左边:先给退路,再给危险动作。
+              pendingDelete ? h('button', {
+                key: 'cancel',
+                type: 'button',
+                className: 'dsh-sc-btn',
+                disabled: busy,
+                onClick: () => setPendingDelete(false),
+              }, t('cancel')) : null,
               h('button', {
                 key: 'del',
                 type: 'button',
@@ -765,9 +764,6 @@ window.__ModuleLoader__.load({
               }, t('retry')),
             ])
             : null,
-          notice !== undefined
-            ? h('div', { key: 'ok', className: 'dsh-sc-note dsh-sc-note-ok', style: { marginTop: '12px' } }, notice)
-            : null,
           catalog === undefined && error === undefined
             ? h('div', { key: 'loading', className: 'dsh-sc-center' }, t('loading'))
             : h('div', { key: 'body', className: 'dsh-sc-body' }, [list, detail]),
@@ -791,7 +787,7 @@ window.__ModuleLoader__.load({
       const submit = async () => {
         setBusy(true);
         try {
-          const payload = await apiPost({
+          await apiPost({
             op: 'create',
             ...pickScope(sessions, scopeCache),
             name,
@@ -799,7 +795,8 @@ window.__ModuleLoader__.load({
             body,
             rootId,
           });
-          onDone(`${t('created')}: ${payload.name}`);
+          // 建好就收表单:列表刷新后能看到新技能,不再另弹提示。
+          onDone();
         } catch (cause) {
           onError(String(cause?.message ?? cause));
         } finally {

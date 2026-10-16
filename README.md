@@ -37,7 +37,8 @@ Sidebar                                   Main area
 | Read body | Renders the raw `SKILL.md` Markdown inside the panel (no right-hand resource pane needed) |
 | Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
 | Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root |
-| Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete |
+| Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete; the confirmation puts **取消 / Cancel** to the left of **确认删除? / Confirm delete?** |
+| No success toasts | The panel shows no "saved / created / deleted" notice: the state change itself is the feedback (the save button's three states, a row appearing in or leaving the list). Only failures render, as a red bar with a retry button |
 | Read-only guard | Skills embedded in plugins (e.g. `office-docx`) are labelled *embedded* and their switches/deletion are disabled |
 | Bundled skill | Ships an embedded **`skill-authoring`** skill (guidance + `references/` + a starter template) that teaches the agent which root a skill belongs in, what the frontmatter contract is, and where a skill's resource files go |
 | Model tool | Registers **`skill_create`**, which writes `<root>/<name>/SKILL.md` plus any resource files in one call — the path that works for skill roots outside the session workspace, where the file-write tools are sandboxed |
@@ -124,7 +125,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.1" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.2" }
 }
 ```
 
@@ -188,7 +189,9 @@ Nothing appears in the sidebar after install + restart? Check in this order:
 4. Flip switches as you like: they move immediately and stay staged in the panel. The button to the left of
    *Back to session* tracks the state — **未修改** (greyed, nothing staged) → **保存** (active, changes staged;
    a count appears when several skills are staged) → **已保存** (greyed, written). Editing anything again puts
-   it back to 保存. Press **Read body** for the Markdown, or **Create** / **Delete** to manage files.
+   it back to 保存. Press **Read body** for the Markdown, **Create** for a new skill, or **Delete** — whose
+   confirmation pairs **取消** with **确认删除?**, cancel sitting on the left. Successful actions print no
+   notice; only failures show a red bar with a retry button.
 
 ## HTTP API
 
@@ -319,8 +322,9 @@ skill's invocation policy comes from the file on disk even when the registry sna
 `client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
 and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
 `setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
-next edit), and a lagging catalog snapshot cannot bounce the switch back. It intercepts POSTs, so the
-run never rewrites a real `SKILL.md`.
+next edit), and a lagging catalog snapshot cannot bounce the switch back. It then walks the delete
+confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. It
+intercepts POSTs (and throws on `create` / `delete`), so the run never rewrites a real `SKILL.md`.
 
 > Renaming or relocating the package: the client module table caches package metadata by
 > `(loader baseUrl, loader line name)` — no file timestamps — so a running host keeps the old path.
@@ -379,7 +383,8 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 查看正文 | 面板内直接读 `SKILL.md` 原文（Markdown 原文，不经过右栏） |
 | 调用开关 | 开关先改本地状态（**点了立刻切换**，不发请求），再按「返回会话」左边的 **保存** 按钮写回 frontmatter（按钮三态：未修改 → 保存 → 已保存，多个技能待保存时显示「保存 (n)」）；写盘后监听器立刻把新目录推给模型 |
 | 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md` |
-| 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（可手工恢复，不硬删） |
+| 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（可手工恢复，不硬删）；确认时「取消」排在「确认删除?」**左边** |
+| 无成功提示 | 面板不再弹「已保存 / 已创建 / 已移动到 .trash」这类提示：状态变化本身就是反馈（保存按钮三态、列表增删一行）。只有失败才渲染成红色条 + 重试按钮 |
 | 只读保护 | 插件内嵌技能（如 `office-docx`、`diagnose-windows-sandbox-acl`）标注「内嵌」，开关与删除按钮禁用 |
 | 随包技能 | 附带一个内嵌的 **`skill-authoring`** 指导技能（正文 + `references/` + 起步模板）：技能该放哪个根、frontmatter 契约是什么、资源文件放哪、怎么把技能打进插件包 |
 | 模型工具 | 注册 **`skill_create`**：一次调用写出 `<root>/<name>/SKILL.md` 与全部资源文件 —— 技能根在工作区之外时（文件写入工具被沙箱挡住）这是唯一走得通的路径 |
@@ -448,7 +453,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.1" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.2" }
 }
 ```
 
@@ -586,8 +591,9 @@ node "$here\verify-skill.mjs"
 
 `client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
 拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
-未修改 → 保存 → 已保存 走(再改一次回到保存)、以及宿主目录快照慢半拍也弹不回开关。
-它拦下了所有 POST,所以跑一遍不会改动任何真实 `SKILL.md`。
+未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
+还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete 请求。
+它拦下了所有 POST(`create`/`delete` 直接抛错),所以跑一遍不会改动任何真实 `SKILL.md`。
 
 > 搬迁/改名注意：客户端模块表按 `(loader baseUrl, loader 行名)` 缓存包元信息，不含文件时间戳。
 > 把包挪到别处后，运行中的宿主仍握着旧路径；浏览器端用的是激活时读进内存的快照，

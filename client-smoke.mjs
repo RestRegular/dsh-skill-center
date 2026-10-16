@@ -337,6 +337,10 @@ globalThis.fetch = async (input, init) => {
     if (body.op === 'setInvocation') {
       return { ok: true, status: 200, json: async () => ({ ok: true, name: body.name, changed: true }) };
     }
+    // 护栏:create / delete 会真的改动技能目录,冒烟测试绝不允许它们跑出去。
+    if (body.op === 'delete' || body.op === 'create') {
+      throw new Error(`冒烟测试拦下了会改动真实技能目录的请求:${body.op}`);
+    }
   }
   return realFetch(input, init);
 };
@@ -404,6 +408,39 @@ await sw2.element.props.onClick();
 const afterSecond = await renderRounds(2);
 const save3 = saveButton(afterSecond.seen);
 check('再次修改后按钮重新变成「保存」', save3?.element.props.children === dictZH.save && save3?.element.props.disabled === false, `${String(save3?.element.props.children)} disabled=${String(save3?.element.props.disabled)}`);
+check('全程没有绿色提示条(成功提示已全部移除)', afterSecond.seen.every(({ element }) => !(typeof element.props.className === 'string' && element.props.className.includes('dsh-sc-note-ok'))));
+
+// ---------------------------------------------------------------------------
+// 删除确认流程:点「删除」后,「取消」出现在「确认删除?」左边;取消可退回。
+// 只点「取消」——「确认删除?」会真的删掉技能,护栏会直接抛错。
+// ---------------------------------------------------------------------------
+console.log(`\n== 删除确认流程 ==`);
+
+/** 详情区里的「删除」/「确认删除?」按钮。 */
+const deleteButton = (seen) => seen.find(({ element }) => element.type === 'button' && element.props.children === dictZH.delete);
+/** 「取消」按钮。 */
+const cancelButton = (seen) => seen.find(({ element }) => element.type === 'button' && element.props.children === dictZH.cancel);
+/** 「确认删除?」按钮。 */
+const confirmButton = (seen) => seen.find(({ element }) => element.type === 'button' && element.props.children === dictZH.deleteConfirm);
+/** 某个按钮在渲染顺序里的位置(用于比较左右)。 */
+const orderOf = (seen, entry) => seen.indexOf(entry);
+
+const beforeDelete = await renderRounds(2);
+check('初始只有「删除」,没有「取消」', deleteButton(beforeDelete.seen) !== undefined && cancelButton(beforeDelete.seen) === undefined);
+await deleteButton(beforeDelete.seen).element.props.onClick();
+const pendingDelete = await renderRounds(2);
+const cancelEntry = cancelButton(pendingDelete.seen);
+const confirmEntry = confirmButton(pendingDelete.seen);
+check('点「删除」后按钮变成「确认删除?」', confirmEntry !== undefined);
+check('出现「取消」按钮', cancelEntry !== undefined);
+check('「取消」排在「确认删除?」左边', cancelEntry !== undefined && confirmEntry !== undefined
+  && orderOf(pendingDelete.seen, cancelEntry) < orderOf(pendingDelete.seen, confirmEntry),
+`cancel@${orderOf(pendingDelete.seen, cancelEntry)} confirm@${orderOf(pendingDelete.seen, confirmEntry)}`);
+await cancelEntry.element.props.onClick();
+const cancelled = await renderRounds(2);
+check('点「取消」后退回「删除」且不再有「确认删除?」/「取消」', deleteButton(cancelled.seen) !== undefined
+  && confirmButton(cancelled.seen) === undefined && cancelButton(cancelled.seen) === undefined);
+check('取消过程中没有发出任何 delete 请求', posts.every((body) => body.op !== 'delete'), JSON.stringify(posts.map((body) => body.op)));
 
 globalThis.fetch = realFetch;
 
