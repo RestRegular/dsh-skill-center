@@ -295,7 +295,13 @@ check('sidebar.panellist order=1(排在 plugins 的 0 之后)', row?.options.ord
 check('sidebar.panellist label 是 thunk', typeof row?.options.label === 'function');
 check('sidebar.panellist label 取到中文', row?.options.label() === '技能中心', String(row?.options.label?.()));
 check('面板与行组件都是函数', typeof panel?.component === 'function' && typeof row?.component === 'function');
-check('图标组件可渲染', renderTree(React.createElement(row.component, { size: 16 })).length === 0 || true);
+// 侧栏图标:16px 线形闪电,与包根 icon.svg 同一记号(旧的三方块网格已弃用)。
+const iconElement = row.component({ size: 16 });
+const iconPaths = (Array.isArray(iconElement?.props?.children) ? iconElement.props.children : [iconElement?.props?.children])
+  .filter((child) => child?.type === 'path');
+check('侧栏图标是线形闪电(path, 16px, currentColor 描边)', iconElement?.type === 'svg'
+  && iconElement.props.width === 16 && iconElement.props.stroke === 'currentColor'
+  && iconPaths.length === 1 && String(iconPaths[0].props.d).startsWith('M9.1 2.3'), JSON.stringify(iconElement?.props));
 
 console.log(`\n== 渲染面板(真实 HTTP → 宿主路由) ==`);
 const Page = panel.component;

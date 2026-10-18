@@ -384,6 +384,10 @@ window.__ModuleLoader__.load({
 
     /**
      * 侧栏全局面板行的图标;`size` 由宿主给(展开 16 / 收起 18)。
+     *
+     * 记号是一道闪电(技能 = 能力),与包根 icon.svg 同一个记号:16px 下它是一个
+     * 完整的轮廓,而三块方格的旧图标在小尺寸会和宿主的其它网格类图标混在一起。
+     * 这里保持宿主侧栏的线形风格:currentColor 描边、无填充,主题切换自动跟随。
      * @param props - `{ size, active }`。
      * @returns SVG 元素。
      */
@@ -399,11 +403,7 @@ window.__ModuleLoader__.load({
         strokeWidth: 1.3,
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
-      }, [
-        h('rect', { key: 'a', x: 2.2, y: 3, width: 5.2, height: 4.4, rx: 1.1 }),
-        h('rect', { key: 'b', x: 8.6, y: 3, width: 5.2, height: 9.9, rx: 1.1 }),
-        h('rect', { key: 'c', x: 2.2, y: 8.6, width: 5.2, height: 4.3, rx: 1.1 }),
-      ]);
+      }, h('path', { key: 'bolt', d: 'M9.1 2.3 L4.6 9 H7.7 L6.9 13.7 L11.4 7 H8.3 Z' }));
     }
 
     // ------------------------------------------------------------------

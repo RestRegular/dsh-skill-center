@@ -9,7 +9,8 @@
 
 A Skill Center panel for **DeepSeek Harness**: browse every skill the current session can see,
 read its `SKILL.md`, flip the model/user invocation switches, create and delete skills — without
-leaving the app and without hand-editing frontmatter.
+leaving the app and without hand-editing frontmatter. The package ships `icon.svg` for the plugin
+manager and uses the same lightning mark for the sidebar entry, so the row and the plugin card match.
 
 > [!NOTE]
 > The npm name `dsh-skill-center` is taken by an unrelated project, so this plugin is published as
@@ -126,7 +127,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.4" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.5" }
 }
 ```
 
@@ -386,7 +387,8 @@ version fails with `E409 Cannot publish over previously staged version <version>
 ## 中文
 
 **DeepSeek Harness 的技能管理面板**：在首页侧栏「新会话」下方的「插件」入口下面加一行「技能中心」，
-点开后中央区域显示面板，用来查看和改写当前会话能看到的技能。
+点开后中央区域显示面板，用来查看和改写当前会话能看到的技能。包内 `icon.svg` 供插件管理器使用，
+侧栏入口用同一枚闪电记号，两处视觉一致。
 
 > [!NOTE]
 > npm 上的 `dsh-skill-center` 已被另一个无关项目占用，所以本插件发布为
@@ -472,7 +474,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.4" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.5" }
 }
 ```
 

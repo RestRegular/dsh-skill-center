@@ -1,0 +1,24 @@
+<svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    技能中心的插件图标:一道闪电。技能 = 能力,闪电是"能力/技能槽"最直白的记号;
+    相比三块方格的旧记号,它在 16px 下仍然是一个完整可辨的轮廓。
+
+    沿用宿主内置插件美术的规范(见 dsh-memory 的 icon.svg):36×36 画布、
+    内缩 4 的 28×28 圆角瓦片(rx 8)、瓦片自上而下 #69B9FF → #324DE2 的蓝色渐变。
+    不写死 width/height,显示尺寸交给消费方(插件管理器行 30 / 卡片 36)。
+
+    记号用深墨蓝 #0E1C58 而不是白色:图标会出现在浅色主题的插件卡片/设置导航里,
+    瓦片顶部是亮蓝,白描边在那一段会糊掉。深墨蓝在整块渐变上对比度都够,缩到 16px
+    依然清楚。形状只用"一个实心闪电",不加细线装饰 —— 小尺寸下细节会先消失。
+  -->
+  <g transform="translate(18 18) scale(0.9286) translate(-18 -18)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="url(#skill_tile)" />
+    <path d="M21 9.2 L12.9 19.4 H17.6 L16 26.8 L24.1 16.6 H19.4 Z" fill="#0E1C58" />
+  </g>
+  <defs>
+    <linearGradient id="skill_tile" x1="18" y1="4" x2="18" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69B9FF" />
+      <stop offset="1" stop-color="#324DE2" />
+    </linearGradient>
+  </defs>
+</svg>
