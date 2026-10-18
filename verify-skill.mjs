@@ -16,7 +16,7 @@
  *
  * 运行: node verify-skill.mjs
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { apply, inject, name } from './lib/index.js';
@@ -478,6 +478,109 @@ check(
 // ---------------------------------------------------------------------------
 // 4. 降级:任何一块缺服务/失败都不该炸宿主
 // ---------------------------------------------------------------------------
+
+console.log('\n== 回收站 ==');
+/**
+ * 打一次回环路由。
+ * @param route - 路由处理器。
+ * @param method - GET / POST。
+ * @param query - 查询串(GET)。
+ * @param body - 请求体(POST)。
+ * @returns `{ status, payload }`。
+ */
+async function callRoute(route, method, query, body) {
+  const request = {
+    method,
+    url: query === undefined ? '/dsh-skill-center/api' : `/dsh-skill-center/api?${query}`,
+    socket: { remoteAddress: '127.0.0.1' },
+    on(event, callback) {
+      if (event === 'data' && body !== undefined) callback(Buffer.from(JSON.stringify(body)));
+      if (event === 'end') callback();
+      return request;
+    },
+  };
+  const response = {
+    status: 0,
+    body: '',
+    writeHead(status) { this.status = status; },
+    end(chunk) { this.body = chunk; },
+  };
+  await route.handler(request, response);
+  return { status: response.status, payload: JSON.parse(response.body) };
+}
+
+const trashDir = join(agentsHome, 'skills', 'trash-me');
+mkdirSync(trashDir, { recursive: true });
+const trashFile = join(trashDir, 'SKILL.md');
+writeFileSync(trashFile, '---\nname: trash-me\ndescription: "Use when testing trash."\n---\n\n# trash\n');
+const trashSkill = {
+  name: 'trash-me',
+  description: 'Use when testing trash.',
+  provider: 'dsh-skill-filesystem',
+  source: 'user-agents',
+  path: trashFile,
+};
+const trashHarness = createHarness({ catalogSkills: [trashSkill] });
+apply(trashHarness.ctx);
+const trashRoute = trashHarness.state.routes[0];
+const cwdQuery = `cwd=${encodeURIComponent(project)}`;
+
+const deleted = await callRoute(trashRoute, 'POST', undefined, { op: 'delete', name: 'trash-me', cwd: project });
+check('delete 把技能移进 .trash', deleted.payload.ok === true && !existsSync(trashDir), JSON.stringify(deleted.payload));
+trashHarness.setCatalogSkills([]);
+const trashList = await callRoute(trashRoute, 'GET', `op=trash&${cwdQuery}`);
+const trashEntry = trashList.payload.entries?.find((entry) => entry.name === 'trash-me');
+check('GET trash 列出条目(带根与种类)', trashEntry !== undefined && trashEntry.rootId === 'user-agents' && trashEntry.kind === 'directory', JSON.stringify(trashList.payload));
+check('条目带删除时间与 .trash 路径', Number.isFinite(trashEntry?.stamp) && String(trashEntry?.path).includes('.trash'), JSON.stringify(trashEntry));
+const withTrash = await callRoute(trashRoute, 'GET', `op=list&${cwdQuery}`);
+check('list 回报回收站条数', withTrash.payload.counts?.trash === 1, JSON.stringify(withTrash.payload.counts));
+
+const traversal = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'restore', rootId: 'user-agents', entry: '../evil', cwd: project,
+});
+check('restore 拒绝路径穿越', traversal.payload.ok === false && String(traversal.payload.error).includes('非法'), JSON.stringify(traversal.payload));
+
+const restored = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'restore', rootId: 'user-agents', entry: trashEntry.entry, cwd: project,
+});
+check('restore 把技能移回原根', restored.payload.ok === true && existsSync(trashFile), JSON.stringify(restored.payload));
+
+// 目标已存在时必须拒绝,绝不覆盖磁盘上的同名技能。
+trashHarness.setCatalogSkills([trashSkill]);
+await callRoute(trashRoute, 'POST', undefined, { op: 'delete', name: 'trash-me', cwd: project });
+trashHarness.setCatalogSkills([]);
+mkdirSync(trashDir, { recursive: true });
+writeFileSync(trashFile, '---\nname: trash-me\ndescription: "placeholder"\n---\n\n# placeholder\n');
+const conflictList = await callRoute(trashRoute, 'GET', `op=trash&${cwdQuery}`);
+const conflictEntry = conflictList.payload.entries?.find((entry) => entry.name === 'trash-me');
+const conflict = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'restore', rootId: 'user-agents', entry: conflictEntry.entry, cwd: project,
+});
+check('目标已存在时 restore 拒绝覆盖', conflict.payload.ok === false && String(conflict.payload.error).includes('已存在'), JSON.stringify(conflict.payload));
+rmSync(trashDir, { recursive: true, force: true });
+
+const emptied = await callRoute(trashRoute, 'POST', undefined, { op: 'emptyTrash', cwd: project });
+check('emptyTrash 永久删除条目', emptied.payload.ok === true && emptied.payload.removed >= 1 && readdirSync(join(agentsHome, 'skills', '.trash')).length === 0, JSON.stringify(emptied.payload));
+
+// 平坦技能(`<name>.md`)进回收站后是文件,恢复也必须回到 `<name>.md`。
+writeFileSync(join(agentsHome, 'skills', 'flat-bin.md'), '---\nname: flat-bin\ndescription: "flat bin"\n---\n\n# flat\n');
+trashHarness.setCatalogSkills([{
+  name: 'flat-bin',
+  description: 'flat bin',
+  provider: 'dsh-skill-filesystem',
+  source: 'user-agents',
+  path: join(agentsHome, 'skills', 'flat-bin.md'),
+}]);
+await callRoute(trashRoute, 'POST', undefined, { op: 'delete', name: 'flat-bin', cwd: project });
+trashHarness.setCatalogSkills([]);
+const flatList = await callRoute(trashRoute, 'GET', `op=trash&${cwdQuery}`);
+const flatEntry = flatList.payload.entries?.find((entry) => entry.name === 'flat-bin');
+check('平坦技能进回收站后是 .md 文件', flatEntry?.kind === 'file', JSON.stringify(flatEntry));
+const flatBack = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'restore', rootId: 'user-agents', entry: flatEntry.entry, cwd: project,
+});
+check('平坦技能可恢复成 <name>.md', flatBack.payload.ok === true && existsSync(join(agentsHome, 'skills', 'flat-bin.md')), JSON.stringify(flatBack.payload));
+await callRoute(trashRoute, 'POST', undefined, { op: 'emptyTrash', cwd: project });
 
 console.log('\n== 降级 ==');
 const minimal = createHarness({ tools: false, webServer: false });

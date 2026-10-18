@@ -58,7 +58,16 @@ window.__ModuleLoader__.load({
         delete: '删除',
         deleteConfirm: '确认删除?',
         cancel: '取消',
-        deleteHint: '删除会把技能移动到同根目录的 .trash 下,可手动恢复。',
+        deleteHint: '删除会把技能移动到同根目录的 .trash 下,可在回收站里恢复。',
+        trash: '回收站',
+        backToList: '返回技能列表',
+        trashEmpty: '回收站是空的',
+        trashHint: '恢复会把技能移回原来的技能根;清空回收站会永久删除,无法撤销。',
+        restore: '恢复',
+        deletedAt: '删除于',
+        emptyTrash: '清空回收站',
+        emptyTrashConfirm: '确认清空?',
+        emptyTrashHint: '清空会永久删除回收站里的所有条目,无法恢复。',
         preview: '正文',
         previewHide: '收起正文',
         reloadBody: '读取正文',
@@ -109,7 +118,16 @@ window.__ModuleLoader__.load({
         delete: 'Delete',
         deleteConfirm: 'Confirm delete?',
         cancel: 'Cancel',
-        deleteHint: 'Delete moves the skill into a .trash folder under the same root; restore it by hand.',
+        deleteHint: 'Delete moves the skill into a .trash folder under the same root; restore it from the panel\'s trash.',
+        trash: 'Trash',
+        backToList: 'Back to skills',
+        trashEmpty: 'The trash is empty',
+        trashHint: 'Restore moves the skill back into its original root; emptying the trash deletes everything in it for good.',
+        restore: 'Restore',
+        deletedAt: 'Deleted',
+        emptyTrash: 'Empty trash',
+        emptyTrashConfirm: 'Confirm empty?',
+        emptyTrashHint: 'Emptying deletes every trash entry permanently.',
         preview: 'Body',
         previewHide: 'Hide body',
         reloadBody: 'Load body',
@@ -338,6 +356,26 @@ window.__ModuleLoader__.load({
       return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 
+    /**
+     * 回收站条目的稳定标识:同一个技能可以在多个根里各有一条。
+     * @param entry - 回收站条目。
+     * @returns `<rootId>/<entry>`。
+     */
+    function trashKey(entry) {
+      return `${entry.rootId}/${entry.entry}`;
+    }
+
+    /**
+     * 把回收站条目的删除时间渲染成本地时间。
+     * @param entry - 回收站条目。
+     * @returns 文本;时间不可解析时为空串。
+     */
+    function formatDeletedAt(entry) {
+      const stamp = typeof entry?.stamp === 'number' ? entry.stamp : Date.parse(entry?.deletedAt);
+      if (!Number.isFinite(stamp)) return '';
+      return new Date(stamp).toLocaleString();
+    }
+
     // ------------------------------------------------------------------
     // 侧栏图标
     // ------------------------------------------------------------------
@@ -402,6 +440,14 @@ window.__ModuleLoader__.load({
         const [shownEdits, setShownEdits] = React.useState({});
         /** 本次进入面板后是否保存过:决定按钮显示"未修改"还是"已保存"。 */
         const [savedOnce, setSavedOnce] = React.useState(false);
+        /** 是否正在看回收站:列表与详情整体切换到 `.trash` 条目。 */
+        const [trashOpen, setTrashOpen] = React.useState(false);
+        /** 回收站条目;undefined 表示还没读过。 */
+        const [trash, setTrash] = React.useState(undefined);
+        /** 回收站里选中的条目 key(见 trashKey)。 */
+        const [selectedTrash, setSelectedTrash] = React.useState(undefined);
+        /** 清空回收站是否已进入二次确认。 */
+        const [pendingEmpty, setPendingEmpty] = React.useState(false);
 
         const load = React.useCallback(async () => {
           setBusy(true);
@@ -442,6 +488,25 @@ window.__ModuleLoader__.load({
 
         React.useEffect(() => { load(); }, [load]);
 
+        /**
+         * 重读回收站条目。选中项跟着条目走:还在就保留,没了就落到最新一条。
+         */
+        const loadTrash = React.useCallback(async () => {
+          try {
+            const payload = await apiGet('trash', pickScope(sessions, scopeCache));
+            const entries = Array.isArray(payload.entries) ? payload.entries : [];
+            setTrash(entries);
+            setSelectedTrash((previous) => {
+              if (previous !== undefined && entries.some((entry) => trashKey(entry) === previous)) {
+                return previous;
+              }
+              return entries.length === 0 ? undefined : trashKey(entries[0]);
+            });
+          } catch (cause) {
+            setError(String(cause?.message ?? cause));
+          }
+        }, [sessions]);
+
         const skills = catalog?.skills ?? [];
         const sources = Array.from(new Set(skills.map((skill) => skill.source).filter(Boolean))).sort();
         const filtered = skills.filter((skill) => {
@@ -452,6 +517,17 @@ window.__ModuleLoader__.load({
             || String(skill.description ?? '').toLowerCase().includes(needle);
         });
         const current = skills.find((skill) => skill.name === selected) ?? filtered[0];
+
+        /** 回收站条目(搜索框在回收站视图里同样按名字过滤)。 */
+        const trashAll = trash ?? [];
+        const trashFiltered = trashAll.filter((entry) => {
+          const needle = query.trim().toLowerCase();
+          return needle === '' || String(entry.name ?? '').toLowerCase().includes(needle);
+        });
+        const currentTrash = trashFiltered.find((entry) => trashKey(entry) === selectedTrash)
+          ?? (trashFiltered.length === 0 ? undefined : trashFiltered[0]);
+        /** 工具栏按钮上的条数:回收站视图用已读到的条目数,否则用目录快照里的计数。 */
+        const trashCount = trashOpen ? trashAll.length : (catalog?.counts?.trash ?? 0);
         const scopeText = catalog === undefined ? ''
           : catalog.tier === 'process-cwd' || catalog.tier === 'global' ? t('scopeCwd')
             : catalog.tier === 'preset-scope' ? t('scopePreset') : t('scopeLive');
@@ -565,6 +641,45 @@ window.__ModuleLoader__.load({
           },
         );
 
+        /** 打开回收站:离开新建/删除确认,读一次 `.trash`。 */
+        const openTrash = () => {
+          setTrashOpen(true);
+          setCreating(false);
+          setPendingDelete(false);
+          setPendingEmpty(false);
+          setBody(undefined);
+          setError(undefined);
+          loadTrash();
+        };
+
+        /** 关掉回收站,回到技能列表。 */
+        const closeTrash = () => {
+          setTrashOpen(false);
+          setTrash(undefined);
+          setSelectedTrash(undefined);
+          setPendingEmpty(false);
+        };
+
+        /** 恢复一条:宿主把它移回原技能根,成功后重读回收站与技能目录。 */
+        const restoreEntry = (entry) => mutate(async () => {
+          await apiPost({
+            op: 'restore',
+            ...pickScope(sessions, scopeCache),
+            rootId: entry.rootId,
+            entry: entry.entry,
+          });
+          setSelected(entry.name);
+          setPendingEmpty(false);
+          await loadTrash();
+        });
+
+        /** 清空回收站(已确认):永久删除所有条目,再重读两边的状态。 */
+        const emptyTrash = () => mutate(async () => {
+          await apiPost({ op: 'emptyTrash', ...pickScope(sessions, scopeCache) });
+          setPendingEmpty(false);
+          await loadTrash();
+        });
+
         const loadBody = async (skill) => {
           setBusy(true);
           setError(undefined);
@@ -619,46 +734,122 @@ window.__ModuleLoader__.load({
               ...sources.map((source) => h('option', { key: source, value: source }, source)),
             ]) : null,
             h('button', {
+              key: 'trash',
+              type: 'button',
+              className: `dsh-sc-btn${trashOpen ? ' dsh-sc-btn-primary' : ''}`,
+              onClick: () => { if (trashOpen) closeTrash(); else openTrash(); },
+            }, trashOpen
+              ? t('backToList')
+              : trashCount > 0 ? `${t('trash')} (${trashCount})` : t('trash')),
+            h('button', {
               key: 'new',
               type: 'button',
               className: 'dsh-sc-btn',
-              onClick: () => { setCreating((value) => !value); setPendingDelete(false); },
+              onClick: () => {
+                setTrashOpen(false);
+                setCreating((value) => !value);
+                setPendingDelete(false);
+                setPendingEmpty(false);
+              },
             }, t('create')),
             h('button', {
               key: 'refresh',
               type: 'button',
               className: 'dsh-sc-btn',
               disabled: busy,
-              onClick: () => { setBody(undefined); load(); },
+              onClick: () => {
+                setBody(undefined);
+                load();
+                if (trashOpen) loadTrash();
+              },
             }, t('refresh')),
           ]),
         ]);
 
         const list = h('div', { className: 'dsh-sc-list', key: 'list' },
-          filtered.length === 0
-            ? [h('div', {
-              key: 'e',
-              className: 'dsh-sc-hint',
-              style: { padding: '10px' },
-            }, skills.length === 0 ? t('emptyAll') : t('empty'))]
-            : filtered.map((skill) => h('button', {
-              key: skill.name,
-              type: 'button',
-              className: `dsh-sc-row${current?.name === skill.name ? ' dsh-sc-row-on' : ''}`,
-              onClick: () => { setSelected(skill.name); setBody(undefined); setPendingDelete(false); },
-            }, [
-              h('span', { key: 'n', className: 'dsh-sc-name' }, skill.name),
-              h('span', { key: 'm', className: 'dsh-sc-meta' }, [
-                h('span', { key: 's', className: 'dsh-sc-badge' }, skill.source ?? skill.provider ?? '—'),
-                skill.modelInvocable === false ? h('span', { key: 'mm', className: 'dsh-sc-badge dsh-sc-badge-warn' }, t('modelOff')) : null,
-                skill.userInvocable === false ? h('span', { key: 'uu', className: 'dsh-sc-badge dsh-sc-badge-warn' }, t('userOff')) : null,
-                skill.writable !== true ? h('span', { key: 'em', className: 'dsh-sc-badge' }, t('embedded')) : null,
-              ]),
-              h('span', { key: 'd', className: 'dsh-sc-desc' }, skill.description),
-            ])));
+          trashOpen
+            ? (trashFiltered.length === 0
+              ? [h('div', {
+                key: 'te',
+                className: 'dsh-sc-hint',
+                style: { padding: '10px' },
+              }, trashAll.length === 0 ? t('trashEmpty') : t('empty'))]
+              : trashFiltered.map((entry) => h('button', {
+                key: trashKey(entry),
+                type: 'button',
+                className: `dsh-sc-row${currentTrash !== undefined && trashKey(currentTrash) === trashKey(entry) ? ' dsh-sc-row-on' : ''}`,
+                onClick: () => { setSelectedTrash(trashKey(entry)); setPendingEmpty(false); },
+              }, [
+                h('span', { key: 'n', className: 'dsh-sc-name' }, entry.name),
+                h('span', { key: 'm', className: 'dsh-sc-meta' }, [
+                  h('span', { key: 'r', className: 'dsh-sc-badge' }, entry.rootLabel ?? entry.rootId ?? '—'),
+                ]),
+                h('span', { key: 'd', className: 'dsh-sc-desc' }, formatDeletedAt(entry)),
+              ])))
+            : filtered.length === 0
+              ? [h('div', {
+                key: 'e',
+                className: 'dsh-sc-hint',
+                style: { padding: '10px' },
+              }, skills.length === 0 ? t('emptyAll') : t('empty'))]
+              : filtered.map((skill) => h('button', {
+                key: skill.name,
+                type: 'button',
+                className: `dsh-sc-row${current?.name === skill.name ? ' dsh-sc-row-on' : ''}`,
+                onClick: () => { setSelected(skill.name); setBody(undefined); setPendingDelete(false); },
+              }, [
+                h('span', { key: 'n', className: 'dsh-sc-name' }, skill.name),
+                h('span', { key: 'm', className: 'dsh-sc-meta' }, [
+                  h('span', { key: 's', className: 'dsh-sc-badge' }, skill.source ?? skill.provider ?? '—'),
+                  skill.modelInvocable === false ? h('span', { key: 'mm', className: 'dsh-sc-badge dsh-sc-badge-warn' }, t('modelOff')) : null,
+                  skill.userInvocable === false ? h('span', { key: 'uu', className: 'dsh-sc-badge dsh-sc-badge-warn' }, t('userOff')) : null,
+                  skill.writable !== true ? h('span', { key: 'em', className: 'dsh-sc-badge' }, t('embedded')) : null,
+                ]),
+                h('span', { key: 'd', className: 'dsh-sc-desc' }, skill.description),
+              ])));
 
         let detail;
-        if (creating) {
+        if (trashOpen) {
+          detail = currentTrash === undefined
+            ? h('div', { key: 'tempty', className: 'dsh-sc-center' }, t('trashEmpty'))
+            : h('div', { key: 'tdetail', className: 'dsh-sc-detail' }, [
+              h('h2', { key: 'h', className: 'dsh-sc-h2' }, currentTrash.name),
+              h('p', { key: 'th', className: 'dsh-sc-p' }, t('trashHint')),
+              h('div', { key: 'kv', className: 'dsh-sc-section' }, [
+                h('div', { key: 'l', className: 'dsh-sc-label' }, t('path')),
+                h('dl', { key: 'd', className: 'dsh-sc-kv' }, [
+                  h('dt', { key: 'r' }, t('root')), h('dd', { key: 'rv' }, currentTrash.rootLabel ?? currentTrash.rootId ?? '—'),
+                  h('dt', { key: 'f' }, t('path')), h('dd', { key: 'fv' }, currentTrash.path ?? '—'),
+                  h('dt', { key: 't' }, t('deletedAt')), h('dd', { key: 'tv' }, formatDeletedAt(currentTrash)),
+                ]),
+              ]),
+              h('div', { key: 'act', className: 'dsh-sc-actions' }, [
+                h('button', {
+                  key: 'restore',
+                  type: 'button',
+                  className: 'dsh-sc-btn dsh-sc-btn-primary',
+                  disabled: busy,
+                  onClick: () => restoreEntry(currentTrash),
+                }, t('restore')),
+                // 与删除确认同一约定:待确认时"取消"排在危险按钮左边。
+                pendingEmpty ? h('button', {
+                  key: 'cancel',
+                  type: 'button',
+                  className: 'dsh-sc-btn',
+                  disabled: busy,
+                  onClick: () => setPendingEmpty(false),
+                }, t('cancel')) : null,
+                h('button', {
+                  key: 'empty',
+                  type: 'button',
+                  className: `dsh-sc-btn${pendingEmpty ? ' dsh-sc-btn-danger' : ''}`,
+                  disabled: busy,
+                  onClick: () => { if (pendingEmpty) emptyTrash(); else setPendingEmpty(true); },
+                }, pendingEmpty ? t('emptyTrashConfirm') : t('emptyTrash')),
+                pendingEmpty ? h('span', { key: 'eh', className: 'dsh-sc-hint' }, t('emptyTrashHint')) : null,
+              ]),
+            ]);
+        } else if (creating) {
           detail = h(CreateForm, {
             key: 'create',
             t,

@@ -330,12 +330,37 @@ console.log(`\n== 保存按钮流程 ==`);
 
 const realFetch = globalThis.fetch;
 const posts = [];
+/** 回收站桩:GET op=trash 从这里回,restore/emptyTrash 只改它,不碰真实目录。 */
+let trashStub = [];
+/** 造一条假的回收站条目。 */
+const ghostEntry = (name, stamp) => ({
+  name,
+  entry: `${stamp}-${name}`,
+  rootId: 'user-agents',
+  rootLabel: '用户 Agents 技能',
+  kind: 'directory',
+  stamp,
+  deletedAt: new Date(stamp).toISOString(),
+  path: `C:/tmp/skills/.trash/${stamp}-${name}`,
+});
 globalThis.fetch = async (input, init) => {
+  const url = new URL(String(input), window.location.origin);
+  if (url.pathname === '/dsh-skill-center/api' && url.searchParams.get('op') === 'trash') {
+    return { ok: true, status: 200, json: async () => ({ ok: true, entries: trashStub }) };
+  }
   if (init?.method === 'POST') {
     const body = JSON.parse(init.body);
     posts.push(body);
     if (body.op === 'setInvocation') {
       return { ok: true, status: 200, json: async () => ({ ok: true, name: body.name, changed: true }) };
+    }
+    if (body.op === 'restore') {
+      trashStub = trashStub.filter((entry) => entry.entry !== body.entry);
+      return { ok: true, status: 200, json: async () => ({ ok: true, name: String(body.entry).replace(/^\d+-/u, ''), path: 'C:/tmp/skills/restored' }) };
+    }
+    if (body.op === 'emptyTrash') {
+      trashStub = [];
+      return { ok: true, status: 200, json: async () => ({ ok: true, removed: 1 }) };
     }
     // 护栏:create / delete 会真的改动技能目录,冒烟测试绝不允许它们跑出去。
     if (body.op === 'delete' || body.op === 'create') {
@@ -441,6 +466,78 @@ const cancelled = await renderRounds(2);
 check('点「取消」后退回「删除」且不再有「确认删除?」/「取消」', deleteButton(cancelled.seen) !== undefined
   && confirmButton(cancelled.seen) === undefined && cancelButton(cancelled.seen) === undefined);
 check('取消过程中没有发出任何 delete 请求', posts.every((body) => body.op !== 'delete'), JSON.stringify(posts.map((body) => body.op)));
+
+// ---------------------------------------------------------------------------
+// 回收站流程:列出 → 恢复 → 退出 → 重新进入 → 清空(二次确认 + 取消)。
+// trash 的 GET 与 restore/emptyTrash 的 POST 全部走桩,不碰真实技能根。
+// ---------------------------------------------------------------------------
+console.log(`\n== 回收站流程 ==`);
+
+/** 工具栏上的回收站按钮(未打开时文案以「回收站」开头)。 */
+const trashButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && typeof element.props.children === 'string' && element.props.children.startsWith(dictZH.trash));
+/** 打开回收站后工具栏上的「返回技能列表」。 */
+const backToListButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.backToList);
+
+trashStub = [ghostEntry('ghost-skill', 1699999999999)];
+const beforeTrash = await renderRounds(2);
+check('工具栏有回收站按钮', trashButton(beforeTrash.seen) !== undefined);
+await trashButton(beforeTrash.seen).element.props.onClick();
+const trashView = await renderRounds(4);
+check('回收站列出被删除的条目', trashView.text.includes('ghost-skill'), trashView.text.slice(0, 160));
+const restoreEntryButton = trashView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.restore);
+check('回收站条目提供「恢复」按钮', restoreEntryButton !== undefined);
+await restoreEntryButton.element.props.onClick();
+const afterRestore = await renderRounds(6);
+const restorePosts = posts.filter((body) => body.op === 'restore');
+check('恢复只发一次 restore 请求', restorePosts.length === 1, JSON.stringify(restorePosts));
+check('restore 带上 rootId 与 entry', restorePosts[0]?.rootId === 'user-agents'
+  && restorePosts[0]?.entry === '1699999999999-ghost-skill', JSON.stringify(restorePosts[0]));
+check('恢复后回收站变空', afterRestore.text.includes(dictZH.trashEmpty), afterRestore.text.slice(0, 160));
+check('恢复后仍停在回收站(有返回按钮)', backToListButton(afterRestore.seen) !== undefined);
+
+await backToListButton(afterRestore.seen).element.props.onClick();
+const backToSkills = await renderRounds(2);
+check('可退出回收站回到技能列表', trashButton(backToSkills.seen) !== undefined
+  && backToListButton(backToSkills.seen) === undefined
+  && deleteButton(backToSkills.seen) !== undefined, backToSkills.text.slice(0, 120));
+
+trashStub = [ghostEntry('ghost-two', 1700000000000)];
+await trashButton(backToSkills.seen).element.props.onClick();
+const trashAgain = await renderRounds(4);
+const emptyButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.emptyTrash);
+check('重新进入后读到新的条目', trashAgain.text.includes('ghost-two'), trashAgain.text.slice(0, 160));
+const emptyButtonEntry = emptyButton(trashAgain.seen);
+check('回收站有「清空回收站」按钮', emptyButtonEntry !== undefined);
+await emptyButtonEntry.element.props.onClick();
+const pendingEmptyView = await renderRounds(2);
+const confirmEmpty = pendingEmptyView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.emptyTrashConfirm);
+const cancelEmpty = pendingEmptyView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.cancel);
+check('点「清空回收站」先变成「确认清空?」', confirmEmpty !== undefined);
+check('清空确认旁有「取消」', cancelEmpty !== undefined);
+check('「取消」排在「确认清空?」左边', cancelEmpty !== undefined && confirmEmpty !== undefined
+  && orderOf(pendingEmptyView.seen, cancelEmpty) < orderOf(pendingEmptyView.seen, confirmEmpty),
+`cancel@${orderOf(pendingEmptyView.seen, cancelEmpty)} confirm@${orderOf(pendingEmptyView.seen, confirmEmpty)}`);
+check('待确认时没有发出 emptyTrash 请求', posts.every((body) => body.op !== 'emptyTrash'));
+await cancelEmpty.element.props.onClick();
+const cancelledEmpty = await renderRounds(2);
+check('取消后退回「清空回收站」', emptyButton(cancelledEmpty.seen) !== undefined
+  && cancelledEmpty.seen.every(({ element }) => element.props.children !== dictZH.emptyTrashConfirm));
+await emptyButton(cancelledEmpty.seen).element.props.onClick();
+const confirmAgain = (await renderRounds(2)).seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.emptyTrashConfirm);
+await confirmAgain.element.props.onClick();
+const afterEmpty = await renderRounds(6);
+const emptyPosts = posts.filter((body) => body.op === 'emptyTrash');
+check('确认后只发一次 emptyTrash', emptyPosts.length === 1, JSON.stringify(emptyPosts));
+check('清空后回收站显示为空', afterEmpty.text.includes(dictZH.trashEmpty), afterEmpty.text.slice(0, 160));
+check('回收站流程全程没有成功提示条', afterEmpty.seen.every(({ element }) => !(typeof element.props.className === 'string'
+  && element.props.className.includes('dsh-sc-note-ok'))));
 
 globalThis.fetch = realFetch;
 
