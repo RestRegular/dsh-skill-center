@@ -38,7 +38,7 @@ Sidebar                                   Main area
 | Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
 | Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root |
 | Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete; the confirmation puts **取消 / Cancel** to the left of **确认删除? / Confirm delete?** |
-| Trash | The **Trash** button in the toolbar lists every `.trash` entry across the managed roots, with its root and deletion time. **Restore** renames one back into its original root (refusing to overwrite a skill that already exists there); **Empty trash** deletes everything permanently after a **确认清空?** step that pairs a **取消 / Cancel** on its left |
+| Trash | The **Trash** button in the toolbar lists every `.trash` entry across the managed roots, with its root and deletion time. **Restore** renames one back into its original root (refusing to overwrite a skill that already exists there); **Delete** in the detail pane removes the selected entry permanently (after **确认删除?**, Cancel on its left). **Empty trash** sits in the top toolbar and clears every entry, also behind a **确认清空?** step that pairs a **取消 / Cancel** on its left |
 | No success toasts | The panel shows no "saved / created / deleted / restored" notice: the state change itself is the feedback (the save button's three states, a row appearing in or leaving the list, a trash entry leaving the trash). Only failures render, as a red bar with a retry button |
 | Read-only guard | Skills embedded in plugins (e.g. `office-docx`) are labelled *embedded* and their switches/deletion are disabled |
 | Bundled skill | Ships an embedded **`skill-authoring`** skill (guidance + `references/` + a starter template) that teaches the agent which root a skill belongs in, what the frontmatter contract is, and where a skill's resource files go |
@@ -126,7 +126,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.3" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.4" }
 }
 ```
 
@@ -209,6 +209,7 @@ The host half mounts a **loopback-only** route at `/dsh-skill-center/api`:
 | POST | `delete` | `name` | move to `.trash` |
 | GET | `trash` | `sessionId?` `cwd?` | list `.trash` entries across the managed roots (newest first) |
 | POST | `restore` | `rootId` `entry` | rename one `.trash` entry back into its original root; fails instead of overwriting |
+| POST | `deleteTrash` | `rootId` `entry` | permanently delete one `.trash` entry |
 | POST | `emptyTrash` | `sessionId?` `cwd?` `rootId?` | permanently delete trash entries (all managed roots unless `rootId` is given) |
 
 Requests from anything other than `127.0.0.1` / `::1` are rejected with `403`.
@@ -249,9 +250,9 @@ Two halves, no shared imports:
   after a write, so a panel that trusted the snapshot would show its own stale value right after a save —
   which is exactly what made a flipped switch snap back until a manual refresh.
 - Delete is a `rename` into `.trash`; `trash` lists those entries, `restore` renames one back (never
-  overwriting an existing skill), and `emptyTrash` deletes them for good. Trash operations resolve only
-  the working directory — they do not need the skill registry, so they keep working when the catalog
-  read fails.
+  overwriting an existing skill), `deleteTrash` removes one for good, and `emptyTrash` clears them all.
+  Trash operations resolve only the working directory — they do not need the skill registry, so they
+  keep working when the catalog read fails.
 - Also registers an embedded skill provider (`ctx.skills.registerProvider`) for `skills/skill-authoring/`
   and the `skill_create` tool (`ctx.inject(['tools'], …)` + `ctx.tools.register`). The tool schema is a
   hand-written JSON Schema using only the subset `@deepseek-ai/dsh-tools` accepts, so the package keeps
@@ -327,18 +328,21 @@ files, explicit project roots, and the three degraded mount paths. It also asser
 skill's invocation policy comes from the file on disk even when the registry snapshot disagrees, and
 walks the trash round trip through the loopback route: `delete` → `trash` lists the entry with its
 root, `restore` puts a directory bundle and a flat `.md` back, a path-traversal `entry` and an
-existing target are both refused, and `emptyTrash` really removes the entries.
+existing target are both refused, `deleteTrash` removes exactly one entry (and reports a missing one),
+and `emptyTrash` clears the rest.
 
 `client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
 and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
 `setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
 next edit), and a lagging catalog snapshot cannot bounce the switch back. It then walks the delete
 confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. The
-trash flow is stubbed (GET `trash` answers from a fake entry list; `restore` / `emptyTrash` only change
-it): opening the trash lists the entry, **Restore** sends one `restore` with `rootId` + `entry` and
-leaves the trash empty, leaving and re-entering the trash reloads it, and **Empty trash** needs
-确认清空? with 取消 on its left — cancelling sends nothing, confirming sends one `emptyTrash`. It
-intercepts POSTs (and throws on `create` / `delete`), so the run never rewrites a real `SKILL.md`.
+trash flow is stubbed (GET `trash` answers from a fake entry list; `restore` / `deleteTrash` /
+`emptyTrash` only change it): opening the trash lists the entry, **Restore** sends one `restore` with
+`rootId` + `entry` and leaves the trash empty, leaving and re-entering the trash reloads it, the
+detail's **Delete** needs a 确认删除? with 取消 on its left (cancelling sends nothing, confirming sends
+one `deleteTrash`), and the toolbar's **Empty trash** needs 确认清空? the same way (one `emptyTrash`
+only after confirming). It intercepts POSTs (and throws on `create` / `delete`), so the run never
+rewrites a real `SKILL.md`.
 
 > Renaming or relocating the package: the client module table caches package metadata by
 > `(loader baseUrl, loader line name)` — no file timestamps — so a running host keeps the old path.
@@ -398,7 +402,7 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 调用开关 | 开关先改本地状态（**点了立刻切换**，不发请求），再按「返回会话」左边的 **保存** 按钮写回 frontmatter（按钮三态：未修改 → 保存 → 已保存，多个技能待保存时显示「保存 (n)」）；写盘后监听器立刻把新目录推给模型 |
 | 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md` |
 | 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（不硬删）；确认时「取消」排在「确认删除?」**左边** |
-| 回收站 | 工具栏「回收站」列出所有受管根下的 `.trash` 条目（带原技能根与删除时间）；**恢复**把条目移回原技能根（目标已存在时拒绝覆盖），**清空回收站**在「取消」+「确认清空?」二次确认后永久删除全部条目 |
+| 回收站 | 工具栏「回收站」列出所有受管根下的 `.trash` 条目（带原技能根与删除时间）；**恢复**把条目移回原技能根（目标已存在时拒绝覆盖），详情区 **删除** 在「取消」+「确认删除?」后永久删除这一条，顶部工具栏 **清空回收站** 在「取消」+「确认清空?」后永久删除全部条目 |
 | 无成功提示 | 面板不再弹「已保存 / 已创建 / 已移动到 .trash / 已恢复」这类提示：状态变化本身就是反馈（保存按钮三态、列表增删一行、回收站条目消失）。只有失败才渲染成红色条 + 重试按钮 |
 | 只读保护 | 插件内嵌技能（如 `office-docx`、`diagnose-windows-sandbox-acl`）标注「内嵌」，开关与删除按钮禁用 |
 | 随包技能 | 附带一个内嵌的 **`skill-authoring`** 指导技能（正文 + `references/` + 起步模板）：技能该放哪个根、frontmatter 契约是什么、资源文件放哪、怎么把技能打进插件包 |
@@ -468,7 +472,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.3" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.4" }
 }
 ```
 
@@ -528,9 +532,9 @@ pnpm add @restregular/dsh-skill-center
 - 受管根内的技能，`list` 的调用策略**以磁盘上的文件为准**，不照抄注册表快照：技能目录是缓存的，
   而 watcher 的失效事件总在写盘之后一小会儿才到 —— 只信快照的面板会在刚保存完的瞬间把界面弹回
   旧值，这正是「拨完开关又自己跳回去、手动刷新才变」的根因。
-- 删除只 rename 进 `.trash`;回收站三件事各自独立:`trash` 列出条目、`restore` 把条目 rename 回原根
-  (目标已存在就失败,绝不覆盖)、`emptyTrash` 永久删除。回收站操作只解析工作目录、不读技能注册表,
-  所以目录读取失败时它照样能用。
+- 删除只 rename 进 `.trash`;回收站各操作独立:`trash` 列出条目、`restore` 把条目 rename 回原根
+  (目标已存在就失败,绝不覆盖)、`deleteTrash` 永久删除单条、`emptyTrash` 清空。回收站操作只解析
+  工作目录、不读技能注册表,所以目录读取失败时它照样能用。
 - 另注册一个内嵌技能提供方（`ctx.skills.registerProvider`，指向包内 `skills/skill-authoring/`）
   和 `skill_create` 工具（`ctx.inject(['tools'], …)` + `ctx.tools.register`）。
   工具 schema 是手写的原始 JSON Schema，只使用 `@deepseek-ai/dsh-tools` 接受的子集 ——
@@ -576,9 +580,10 @@ Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19387/dsh-skill-center/api
 `create` 与模型工具 `skill_create` 共用一份实现：除 `name` / `description` / `body` / `rootId` 外，
 还接受 `whenToUse`、`resources: [{ path, content }]`、`overwrite`、`modelInvocable`、`userInvocable`。
 
-回收站三个操作：`GET ?op=trash`（列全部条目）、`POST {"op":"restore","rootId":"user-agents","entry":"<条目名>"}`
-（条目名就是 `.trash` 下的直接子项名，形如 `1792173890269-daylog`）、`POST {"op":"emptyTrash"}`
-（不传 `rootId` 清空全部受管根，传了只清那一个）。
+回收站操作：`GET ?op=trash`（列全部条目）、`POST {"op":"restore","rootId":"user-agents","entry":"<条目名>"}`
+（条目名就是 `.trash` 下的直接子项名，形如 `1792173890269-daylog`）、
+`POST {"op":"deleteTrash","rootId":"user-agents","entry":"<条目名>"}`（永久删这一条）、
+`POST {"op":"emptyTrash"}`（不传 `rootId` 清空全部受管根，传了只清那一个）。
 
 ### 开发
 
@@ -610,15 +615,16 @@ node "$here\verify-skill.mjs"
 显式项目根,以及三条降级路径;另外还断言：受管根技能的调用策略取自磁盘文件,即使注册表快照
 给的是旧值;最后把回收站整条链路真跑一遍：`delete` 之后 `trash` 能列出条目（带原根）,
 `restore` 能把目录包和平坦 `.md` 都移回去,路径穿越的 `entry` 与目标已存在都被拒绝,
-`emptyTrash` 真的把条目删掉。
+`deleteTrash` 只删指定那一条（对已不存在的条目报错）,`emptyTrash` 清掉剩下的。
 
 `client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
 拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
 未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
 还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete 请求;
-接着走回收站流程（`trash` / `restore` / `emptyTrash` 全部走桩）:打开回收站列出条目、
+接着走回收站流程（`trash` / `restore` / `deleteTrash` / `emptyTrash` 全部走桩）:打开回收站列出条目、
 **恢复**只发一次带 `rootId` + `entry` 的 `restore` 且回收站变空、退出再进入会重新读,
-**清空回收站**要先过「确认清空?」且「取消」在左边 —— 取消不发请求,确认才发一次 `emptyTrash`。
+详情区 **删除** 要先过「确认删除?」且「取消」在左边（取消不发请求,确认才发一次 `deleteTrash`）,
+顶部 **清空回收站** 同样先过「确认清空?」（确认后才发一次 `emptyTrash`）。
 它拦下了所有 POST(`create`/`delete` 直接抛错),所以跑一遍不会改动任何真实 `SKILL.md`。
 
 > 搬迁/改名注意：客户端模块表按 `(loader baseUrl, loader 行名)` 缓存包元信息，不含文件时间戳。

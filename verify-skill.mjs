@@ -559,6 +559,22 @@ const conflict = await callRoute(trashRoute, 'POST', undefined, {
 check('目标已存在时 restore 拒绝覆盖', conflict.payload.ok === false && String(conflict.payload.error).includes('已存在'), JSON.stringify(conflict.payload));
 rmSync(trashDir, { recursive: true, force: true });
 
+const purged = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'deleteTrash', rootId: 'user-agents', entry: conflictEntry.entry, cwd: project,
+});
+check('deleteTrash 永久删除单条', purged.payload.ok === true && readdirSync(join(agentsHome, 'skills', '.trash')).length === 0, JSON.stringify(purged.payload));
+const purgedAgain = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'deleteTrash', rootId: 'user-agents', entry: conflictEntry.entry, cwd: project,
+});
+check('deleteTrash 对已不存在的条目报错', purgedAgain.payload.ok === false && String(purgedAgain.payload.error).includes('回收站里没有'), JSON.stringify(purgedAgain.payload));
+
+// 再放一条进回收站,供"清空"用例使用。
+mkdirSync(trashDir, { recursive: true });
+writeFileSync(trashFile, '---\nname: trash-me\ndescription: "Use when testing trash."\n---\n\n# trash\n');
+trashHarness.setCatalogSkills([trashSkill]);
+await callRoute(trashRoute, 'POST', undefined, { op: 'delete', name: 'trash-me', cwd: project });
+trashHarness.setCatalogSkills([]);
+
 const emptied = await callRoute(trashRoute, 'POST', undefined, { op: 'emptyTrash', cwd: project });
 check('emptyTrash 永久删除条目', emptied.payload.ok === true && emptied.payload.removed >= 1 && readdirSync(join(agentsHome, 'skills', '.trash')).length === 0, JSON.stringify(emptied.payload));
 

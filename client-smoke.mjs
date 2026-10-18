@@ -358,6 +358,10 @@ globalThis.fetch = async (input, init) => {
       trashStub = trashStub.filter((entry) => entry.entry !== body.entry);
       return { ok: true, status: 200, json: async () => ({ ok: true, name: String(body.entry).replace(/^\d+-/u, ''), path: 'C:/tmp/skills/restored' }) };
     }
+    if (body.op === 'deleteTrash') {
+      trashStub = trashStub.filter((entry) => entry.entry !== body.entry);
+      return { ok: true, status: 200, json: async () => ({ ok: true, name: String(body.entry).replace(/^\d+-/u, ''), rootId: body.rootId }) };
+    }
     if (body.op === 'emptyTrash') {
       trashStub = [];
       return { ok: true, status: 200, json: async () => ({ ok: true, removed: 1 }) };
@@ -507,11 +511,49 @@ check('可退出回收站回到技能列表', trashButton(backToSkills.seen) !==
 trashStub = [ghostEntry('ghost-two', 1700000000000)];
 await trashButton(backToSkills.seen).element.props.onClick();
 const trashAgain = await renderRounds(4);
+check('重新进入后读到新的条目', trashAgain.text.includes('ghost-two'), trashAgain.text.slice(0, 160));
+
+// 单条「删除」:详情区按钮,二次确认「确认删除?」+ 取消在左;确认后发一次 deleteTrash。
+const deleteTrashEntryButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.delete);
+check('回收站详情有「删除」按钮', deleteTrashEntryButton(trashAgain.seen) !== undefined);
+await deleteTrashEntryButton(trashAgain.seen).element.props.onClick();
+const pendingTrashDeleteView = await renderRounds(2);
+const confirmTrashDelete = pendingTrashDeleteView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.deleteConfirm);
+const cancelTrashDelete = pendingTrashDeleteView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.cancel);
+check('点「删除」先变成「确认删除?」', confirmTrashDelete !== undefined);
+check('「取消」排在「确认删除?」左边', cancelTrashDelete !== undefined && confirmTrashDelete !== undefined
+  && orderOf(pendingTrashDeleteView.seen, cancelTrashDelete) < orderOf(pendingTrashDeleteView.seen, confirmTrashDelete),
+`cancel@${orderOf(pendingTrashDeleteView.seen, cancelTrashDelete)} confirm@${orderOf(pendingTrashDeleteView.seen, confirmTrashDelete)}`);
+check('待确认时没有发出 deleteTrash 请求', posts.every((body) => body.op !== 'deleteTrash'));
+await cancelTrashDelete.element.props.onClick();
+const cancelledTrashDelete = await renderRounds(2);
+check('取消后回到「删除」', deleteTrashEntryButton(cancelledTrashDelete.seen) !== undefined
+  && cancelledTrashDelete.seen.every(({ element }) => element.props.children !== dictZH.deleteConfirm));
+await deleteTrashEntryButton(cancelledTrashDelete.seen).element.props.onClick();
+const confirmTrashDeleteAgain = (await renderRounds(2)).seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.deleteConfirm);
+await confirmTrashDeleteAgain.element.props.onClick();
+const afterTrashDelete = await renderRounds(6);
+const deleteTrashPosts = posts.filter((body) => body.op === 'deleteTrash');
+check('确认后只发一次 deleteTrash', deleteTrashPosts.length === 1, JSON.stringify(deleteTrashPosts));
+check('deleteTrash 带上 rootId 与 entry', deleteTrashPosts[0]?.rootId === 'user-agents'
+  && deleteTrashPosts[0]?.entry === '1700000000000-ghost-two', JSON.stringify(deleteTrashPosts[0]));
+check('单条删除后回收站变空', afterTrashDelete.text.includes(dictZH.trashEmpty), afterTrashDelete.text.slice(0, 160));
+
+// 批量「清空回收站」在顶部工具栏,同样二次确认。
+trashStub = [ghostEntry('ghost-three', 1700000000001)];
+await backToListButton(afterTrashDelete.seen).element.props.onClick();
+const backAgain = await renderRounds(2);
+await trashButton(backAgain.seen).element.props.onClick();
+const trashThird = await renderRounds(4);
 const emptyButton = (seen) => seen.find(({ element }) => element.type === 'button'
   && element.props.children === dictZH.emptyTrash);
-check('重新进入后读到新的条目', trashAgain.text.includes('ghost-two'), trashAgain.text.slice(0, 160));
-const emptyButtonEntry = emptyButton(trashAgain.seen);
-check('回收站有「清空回收站」按钮', emptyButtonEntry !== undefined);
+check('重新进入后读到第三条', trashThird.text.includes('ghost-three'), trashThird.text.slice(0, 160));
+const emptyButtonEntry = emptyButton(trashThird.seen);
+check('顶部工具栏有「清空回收站」按钮', emptyButtonEntry !== undefined);
 await emptyButtonEntry.element.props.onClick();
 const pendingEmptyView = await renderRounds(2);
 const confirmEmpty = pendingEmptyView.seen.find(({ element }) => element.type === 'button'

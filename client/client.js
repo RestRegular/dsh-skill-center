@@ -62,8 +62,9 @@ window.__ModuleLoader__.load({
         trash: '回收站',
         backToList: '返回技能列表',
         trashEmpty: '回收站是空的',
-        trashHint: '恢复会把技能移回原来的技能根;清空回收站会永久删除,无法撤销。',
+        trashHint: '恢复会把技能移回原来的技能根;删除会永久移除这一条目。',
         restore: '恢复',
+        deleteTrashHint: '删除会永久移除这一条目,无法恢复。',
         deletedAt: '删除于',
         emptyTrash: '清空回收站',
         emptyTrashConfirm: '确认清空?',
@@ -122,8 +123,9 @@ window.__ModuleLoader__.load({
         trash: 'Trash',
         backToList: 'Back to skills',
         trashEmpty: 'The trash is empty',
-        trashHint: 'Restore moves the skill back into its original root; emptying the trash deletes everything in it for good.',
+        trashHint: 'Restore moves the skill back into its original root; Delete removes this entry for good.',
         restore: 'Restore',
+        deleteTrashHint: 'Delete removes this entry permanently; it cannot be undone.',
         deletedAt: 'Deleted',
         emptyTrash: 'Empty trash',
         emptyTrashConfirm: 'Confirm empty?',
@@ -448,6 +450,8 @@ window.__ModuleLoader__.load({
         const [selectedTrash, setSelectedTrash] = React.useState(undefined);
         /** 清空回收站是否已进入二次确认。 */
         const [pendingEmpty, setPendingEmpty] = React.useState(false);
+        /** 回收站里的"删除"是否已进入二次确认。 */
+        const [pendingTrashDelete, setPendingTrashDelete] = React.useState(false);
 
         const load = React.useCallback(async () => {
           setBusy(true);
@@ -647,6 +651,7 @@ window.__ModuleLoader__.load({
           setCreating(false);
           setPendingDelete(false);
           setPendingEmpty(false);
+          setPendingTrashDelete(false);
           setBody(undefined);
           setError(undefined);
           loadTrash();
@@ -658,6 +663,7 @@ window.__ModuleLoader__.load({
           setTrash(undefined);
           setSelectedTrash(undefined);
           setPendingEmpty(false);
+          setPendingTrashDelete(false);
         };
 
         /** 恢复一条:宿主把它移回原技能根,成功后重读回收站与技能目录。 */
@@ -670,6 +676,20 @@ window.__ModuleLoader__.load({
           });
           setSelected(entry.name);
           setPendingEmpty(false);
+          setPendingTrashDelete(false);
+          await loadTrash();
+        });
+
+        /** 删除回收站里的单条记录(已确认):永久移除,再重读回收站。 */
+        const removeTrashEntry = (entry) => mutate(async () => {
+          await apiPost({
+            op: 'deleteTrash',
+            ...pickScope(sessions, scopeCache),
+            rootId: entry.rootId,
+            entry: entry.entry,
+          });
+          setPendingEmpty(false);
+          setPendingTrashDelete(false);
           await loadTrash();
         });
 
@@ -677,6 +697,7 @@ window.__ModuleLoader__.load({
         const emptyTrash = () => mutate(async () => {
           await apiPost({ op: 'emptyTrash', ...pickScope(sessions, scopeCache) });
           setPendingEmpty(false);
+          setPendingTrashDelete(false);
           await loadTrash();
         });
 
@@ -692,6 +713,36 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         };
+
+        /**
+         * 顶部工具栏里的批量操作:清空回收站。二次确认时"取消"排在
+         * "确认清空?"左边 —— 与删除确认同一约定。
+         */
+        const trashBulkControls = trashOpen
+          ? (pendingEmpty ? [
+            h('button', {
+              key: 'empty-cancel',
+              type: 'button',
+              className: 'dsh-sc-btn',
+              disabled: busy,
+              onClick: () => setPendingEmpty(false),
+            }, t('cancel')),
+            h('button', {
+              key: 'empty-confirm',
+              type: 'button',
+              className: 'dsh-sc-btn dsh-sc-btn-danger',
+              disabled: busy || trashAll.length === 0,
+              onClick: emptyTrash,
+            }, t('emptyTrashConfirm')),
+            h('span', { key: 'empty-hint', className: 'dsh-sc-hint' }, t('emptyTrashHint')),
+          ] : [h('button', {
+            key: 'empty',
+            type: 'button',
+            className: 'dsh-sc-btn',
+            disabled: busy || trashAll.length === 0,
+            onClick: () => setPendingEmpty(true),
+          }, t('emptyTrash'))])
+          : [];
 
         const head = h('div', { className: 'dsh-sc-head', key: 'head' }, [
           h('div', { className: 'dsh-sc-headrow', key: 'r1' }, [
@@ -741,6 +792,7 @@ window.__ModuleLoader__.load({
             }, trashOpen
               ? t('backToList')
               : trashCount > 0 ? `${t('trash')} (${trashCount})` : t('trash')),
+            trashBulkControls,
             h('button', {
               key: 'new',
               type: 'button',
@@ -778,7 +830,11 @@ window.__ModuleLoader__.load({
                 key: trashKey(entry),
                 type: 'button',
                 className: `dsh-sc-row${currentTrash !== undefined && trashKey(currentTrash) === trashKey(entry) ? ' dsh-sc-row-on' : ''}`,
-                onClick: () => { setSelectedTrash(trashKey(entry)); setPendingEmpty(false); },
+                onClick: () => {
+                  setSelectedTrash(trashKey(entry));
+                  setPendingEmpty(false);
+                  setPendingTrashDelete(false);
+                },
               }, [
                 h('span', { key: 'n', className: 'dsh-sc-name' }, entry.name),
                 h('span', { key: 'm', className: 'dsh-sc-meta' }, [
@@ -831,22 +887,25 @@ window.__ModuleLoader__.load({
                   disabled: busy,
                   onClick: () => restoreEntry(currentTrash),
                 }, t('restore')),
-                // 与删除确认同一约定:待确认时"取消"排在危险按钮左边。
-                pendingEmpty ? h('button', {
+                // 与技能删除同一约定:待确认时"取消"排在危险按钮左边。
+                pendingTrashDelete ? h('button', {
                   key: 'cancel',
                   type: 'button',
                   className: 'dsh-sc-btn',
                   disabled: busy,
-                  onClick: () => setPendingEmpty(false),
+                  onClick: () => setPendingTrashDelete(false),
                 }, t('cancel')) : null,
                 h('button', {
-                  key: 'empty',
+                  key: 'trash-del',
                   type: 'button',
-                  className: `dsh-sc-btn${pendingEmpty ? ' dsh-sc-btn-danger' : ''}`,
+                  className: `dsh-sc-btn${pendingTrashDelete ? ' dsh-sc-btn-danger' : ''}`,
                   disabled: busy,
-                  onClick: () => { if (pendingEmpty) emptyTrash(); else setPendingEmpty(true); },
-                }, pendingEmpty ? t('emptyTrashConfirm') : t('emptyTrash')),
-                pendingEmpty ? h('span', { key: 'eh', className: 'dsh-sc-hint' }, t('emptyTrashHint')) : null,
+                  onClick: () => {
+                    if (pendingTrashDelete) removeTrashEntry(currentTrash);
+                    else setPendingTrashDelete(true);
+                  },
+                }, pendingTrashDelete ? t('deleteConfirm') : t('delete')),
+                pendingTrashDelete ? h('span', { key: 'tdh', className: 'dsh-sc-hint' }, t('deleteTrashHint')) : null,
               ]),
             ]);
         } else if (creating) {
