@@ -283,6 +283,8 @@ const OTHER_SESSION = 'session-smoke-other';
 const OTHER_CWD = 'C:\\tmp\\other-workspace';
 /** 已归档会话:作用域菜单必须把它剔除。 */
 const ARCHIVED_SESSION = 'session-smoke-archived';
+/** 空会话(没发过消息):同样不该出现在作用域菜单里。 */
+const BLANK_SESSION = 'session-smoke-blank';
 
 const ctx = {
   get(service) {
@@ -313,6 +315,14 @@ const ctx = {
                 retainedBy: {},
                 updatedAt: 3,
               },
+              [BLANK_SESSION]: {
+                id: BLANK_SESSION,
+                displayTitle: '新会话',
+                cwd: REAL_CWD,
+                blank: true,
+                retainedBy: {},
+                updatedAt: 4,
+              },
             },
           }),
         },
@@ -324,7 +334,7 @@ const ctx = {
         list: {
           getSnapshot: () => ({
             items: [
-              { workspaceId: 'ws-main', title: '主工作区', path: REAL_CWD, sessionIds: [REAL_SESSION, ARCHIVED_SESSION] },
+              { workspaceId: 'ws-main', title: '主工作区', path: REAL_CWD, sessionIds: [REAL_SESSION, ARCHIVED_SESSION, BLANK_SESSION] },
               { workspaceId: 'ws-other', title: 'other-workspace', path: OTHER_CWD, sessionIds: [OTHER_SESSION] },
             ],
             archivedSessionIds: [ARCHIVED_SESSION],
@@ -822,6 +832,8 @@ check('作用域菜单列出另一个会话', openedOptions.some((props) => prop
   && optionLabel(props) === '其他会话'), JSON.stringify(openedOptions.map(optionLabel)));
 check('已归档会话不出现在作用域菜单', openedOptions.every((props) => props['data-value'] !== ARCHIVED_SESSION)
   && !opened.text.includes('已归档会话'), JSON.stringify(openedOptions.map(optionLabel)));
+check('空会话不出现在作用域菜单', openedOptions.every((props) => props['data-value'] !== BLANK_SESSION)
+  && !opened.text.includes('新会话'), JSON.stringify(openedOptions.map(optionLabel)));
 
 // 桩:记录 list 请求的 sessionId/cwd,并回一份只属于"另一个作用域"的目录。
 const scopeLists = [];

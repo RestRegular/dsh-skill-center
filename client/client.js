@@ -376,8 +376,9 @@ window.__ModuleLoader__.load({
      * 把客户端会话目录投影成作用域菜单的分组候选。
      *
      * 技能作用域由「会话 cwd + 会话预设」共同决定,所以候选按会话(而不是按工作区)
-     * 列出;但菜单按工作区分组,和侧栏的心智模型一致。已归档的会话不进候选:
-     * 它们属于历史,不是用户此刻要切换过去浏览的对象。子 Agent 会话同样不出现。
+     * 列出;但菜单按工作区分组,和侧栏的心智模型一致。已归档的会话与空会话
+     * (点过"新建会话"还没发消息)不进候选:它们不是用户此刻要切换过去浏览的对象。
+     * 子 Agent 会话同样不出现。
      *
      * 没有 workspaces 服务的老宿主会退化成按 cwd 分组;每个工作区最多列
      * SCOPE_PER_WORKSPACE 个最近会话,避免下拉被几百个历史会话撑爆。
@@ -407,6 +408,8 @@ window.__ModuleLoader__.load({
       for (const row of rows) {
         if (row?.id === undefined) continue;
         if (row.origin === 'subagent' || row.parentId !== undefined) continue;
+        // 空会话(点过"新建会话"还没发消息)没有可读内容,不是切换作用域的对象。
+        if (row.blank === true) continue;
         const id = String(row.id);
         if (archived.has(id)) continue;
         byId.set(id, row);
