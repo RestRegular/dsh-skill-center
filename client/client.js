@@ -246,12 +246,12 @@ window.__ModuleLoader__.load({
 .dsh-sc-droplabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .dsh-sc-caret{flex:none;opacity:.55;transition:transform .15s ease}
 .dsh-sc-dropbtn[aria-expanded="true"] .dsh-sc-caret{transform:rotate(180deg)}
-.dsh-sc-menu{position:absolute;z-index:60;top:calc(100% + 5px);left:0;width:260px;max-width:calc(100vw - 40px);max-height:320px;overflow:auto;padding:5px;border-radius:var(--dsw-radius-lg,12px);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 12px 32px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:1px}
-.dsh-sc-mgroup{position:sticky;top:-5px;z-index:1;display:flex;align-items:center;gap:6px;margin-top:3px;padding:6px 8px 4px;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-caption);font-size:11px;font-weight:600;letter-spacing:.02em}
+.dsh-sc-menu{position:absolute;z-index:60;top:calc(100% + 5px);left:0;width:260px;max-width:calc(100vw - 40px);max-height:320px;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;padding:5px;border-radius:var(--dsw-radius-lg,12px);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 12px 32px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:1px}
+.dsh-sc-mgroup{position:sticky;top:-5px;z-index:1;display:flex;align-items:center;gap:6px;box-sizing:border-box;margin-top:3px;padding:6px 8px 4px;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-caption);font-size:11px;font-weight:600;letter-spacing:.02em}
 .dsh-sc-mgroup:first-child{border-top:none;margin-top:0}
 .dsh-sc-mgroup-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-sc-mgroup-count{flex:none;font-weight:400;color:var(--dsw-alias-label-caption)}
-.dsh-sc-mopt{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:1.4;text-align:left;cursor:pointer}
+.dsh-sc-mopt{display:flex;align-items:center;gap:8px;align-self:stretch;box-sizing:border-box;padding:7px 9px;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:1.4;text-align:left;cursor:pointer}
 .dsh-sc-mopt-active{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-sc-mopt-on{background:var(--dsw-alias-interactive-bg-active)}
 .dsh-sc-mopt-inner{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
@@ -267,8 +267,8 @@ window.__ModuleLoader__.load({
 .dsh-sc-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
 .dsh-sc-btn-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}
 .dsh-sc-body{display:flex;flex:1;min-height:0}
-.dsh-sc-list{width:288px;flex:none;overflow:auto;border-right:1px solid var(--dsw-alias-border-l2);padding:8px}
-.dsh-sc-row{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:8px 10px;border-radius:var(--dsw-radius-md,8px);border:none;background:transparent;color:inherit;cursor:pointer;font:inherit}
+.dsh-sc-list{width:288px;flex:none;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--dsw-alias-border-l2);padding:8px}
+.dsh-sc-row{display:flex;flex-direction:column;gap:3px;width:100%;box-sizing:border-box;text-align:left;padding:8px 10px;border-radius:var(--dsw-radius-md,8px);border:none;background:transparent;color:inherit;cursor:pointer;font:inherit}
 .dsh-sc-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-sc-row:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}
 .dsh-sc-row-on{background:var(--dsw-alias-interactive-bg-active)}
@@ -277,7 +277,7 @@ window.__ModuleLoader__.load({
 .dsh-sc-meta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;color:var(--dsw-alias-label-caption);font-size:11px}
 .dsh-sc-badge{padding:0 6px;border-radius:var(--dsw-radius-xs,4px);border:.5px solid var(--dsw-alias-border-l3);line-height:16px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
 .dsh-sc-badge-warn{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
-.dsh-sc-detail{flex:1;min-width:0;overflow:auto;padding:18px 22px 32px}
+.dsh-sc-detail{flex:1;min-width:0;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;padding:18px 22px 32px}
 .dsh-sc-h2{font-size:15px;font-weight:600;margin:0 0 6px;word-break:break-all}
 .dsh-sc-p{color:var(--dsw-alias-label-secondary);margin:0 0 16px;white-space:pre-wrap;word-break:break-word}
 .dsh-sc-section{margin:0 0 18px}
@@ -296,7 +296,7 @@ window.__ModuleLoader__.load({
 .dsh-sc-switchlabel{font-weight:600;font-size:12px}
 .dsh-sc-hint{color:var(--dsw-alias-label-caption);font-size:11px}
 .dsh-sc-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
-.dsh-sc-pre{margin:0;padding:12px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-markdown-code-block);color:var(--dsw-alias-label-secondary);font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
+.dsh-sc-pre{margin:0;padding:12px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-markdown-code-block);color:var(--dsw-alias-label-secondary);font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;overflow-x:hidden;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
 .dsh-sc-note{border-radius:var(--dsw-radius-md,8px);padding:9px 12px;font-size:12px;margin:0 20px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .dsh-sc-note-warn{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-warn-primary)}
 .dsh-sc-note-err{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-error-primary)}
@@ -1631,7 +1631,7 @@ window.__ModuleLoader__.load({
               })),
               onChange: (next) => setRootId(String(next ?? '')),
               ariaLabel: t('formRoot'),
-              menuWidth: 340,
+              menuWidth: 300,
             }),
           ]),
           h('p', { key: 'rh', className: 'dsh-sc-hint', style: { margin: 0 } }, t('formRootHint')),

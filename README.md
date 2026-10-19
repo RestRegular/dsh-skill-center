@@ -145,7 +145,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.9" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.10" }
 }
 ```
 
@@ -540,7 +540,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.9" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.10" }
 }
 ```
 
