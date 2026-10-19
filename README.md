@@ -19,7 +19,7 @@ manager and uses the same lightning mark for the sidebar entry, so the row and t
 ```
 Sidebar                                   Main area
 ├ New session                            ┌───────────────────────────────────────────────┐
-├ Plugins            ← order 0           │ Skill Center      8 skills · session scope  Back│
+├ Plugins            ← order 0           │ Skill Center    8 skills · session scope  Back│
 ├ Skill Center       ← order 1 (this)    ├──────────────┬────────────────────────────────┤
 ├ Workspaces / Sessions                  │ auth0-quick… │ auth0-quickstart               │
 └ Settings                               │ discover-…   │ provider / source / root       │
