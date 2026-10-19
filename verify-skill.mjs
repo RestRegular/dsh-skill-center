@@ -598,6 +598,126 @@ const flatBack = await callRoute(trashRoute, 'POST', undefined, {
 check('平坦技能可恢复成 <name>.md', flatBack.payload.ok === true && existsSync(join(agentsHome, 'skills', 'flat-bin.md')), JSON.stringify(flatBack.payload));
 await callRoute(trashRoute, 'POST', undefined, { op: 'emptyTrash', cwd: project });
 
+console.log('\n== 导出 / 导入 ==');
+/**
+ * 打一个 store 模式的 ZIP(CRC 写 0:导入端不校验 CRC)。
+ * @param entries - `[{ path, data }]`。
+ * @returns ZIP 字节。
+ */
+function makeStoreZip(entries) {
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.path, 'utf8');
+    const data = Buffer.from(entry.data, 'utf8');
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0x21, 12);
+    local.writeUInt32LE(0, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    chunks.push(local, name, data);
+    const header = Buffer.alloc(46);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(20, 6);
+    header.writeUInt16LE(0x0800, 8);
+    header.writeUInt16LE(0, 10);
+    header.writeUInt16LE(0, 12);
+    header.writeUInt16LE(0x21, 14);
+    header.writeUInt32LE(0, 16);
+    header.writeUInt32LE(data.length, 20);
+    header.writeUInt32LE(data.length, 24);
+    header.writeUInt16LE(name.length, 28);
+    header.writeUInt16LE(0, 30);
+    header.writeUInt16LE(0, 32);
+    header.writeUInt16LE(0, 34);
+    header.writeUInt32LE(0, 38);
+    header.writeUInt32LE(offset, 42);
+    central.push(header, name);
+    offset += local.length + name.length + data.length;
+  }
+  const centralBuffer = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralBuffer.length, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...chunks, centralBuffer, end]);
+}
+
+const exportDir = join(agentsHome, 'skills', 'export-me');
+mkdirSync(join(exportDir, 'references'), { recursive: true });
+const exportSkillFile = join(exportDir, 'SKILL.md');
+writeFileSync(exportSkillFile, '---\nname: export-me\ndescription: "Use when testing export."\n---\n\n# export\n');
+writeFileSync(join(exportDir, 'references', 'note.md'), '# note\n');
+const exportCatalog = [{
+  name: 'export-me',
+  description: 'Use when testing export.',
+  provider: 'dsh-skill-filesystem',
+  source: 'user-agents',
+  path: exportSkillFile,
+}];
+trashHarness.setCatalogSkills(exportCatalog);
+const exported = await callRoute(trashRoute, 'POST', undefined, { op: 'export', name: 'export-me', cwd: project });
+check('export 返回 ZIP(base64 以 PK 开头)', exported.payload.ok === true
+  && exported.payload.filename === 'export-me.zip'
+  && String(exported.payload.base64).startsWith('UEsDB'), JSON.stringify({ ok: exported.payload.ok, filename: exported.payload.filename, bytes: exported.payload.bytes }));
+
+rmSync(exportDir, { recursive: true, force: true });
+trashHarness.setCatalogSkills([]);
+const imported = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'importSkill', base64: exported.payload.base64, filename: 'export-me.zip', cwd: project,
+});
+check('importSkill 还原目录包与资源', imported.payload.ok === true
+  && existsSync(exportSkillFile)
+  && existsSync(join(exportDir, 'references', 'note.md')), JSON.stringify(imported.payload));
+check('导入结果带上名称与写入根', imported.payload.name === 'export-me' && imported.payload.rootId === 'user-agents', JSON.stringify(imported.payload));
+
+const importAgain = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'importSkill', base64: exported.payload.base64, filename: 'export-me.zip', cwd: project,
+});
+check('同名技能已存在时 import 拒绝', importAgain.payload.ok === false && String(importAgain.payload.error).includes('已存在'), JSON.stringify(importAgain.payload));
+
+const rawMarkdown = '---\nname: flat-import\ndescription: "Use when testing flat import."\n---\n\n# flat import\n';
+const flatImported = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'importSkill', base64: Buffer.from(rawMarkdown, 'utf8').toString('base64'), filename: 'flat-import.md', cwd: project,
+});
+check('裸 .md 导入为平坦技能', flatImported.payload.ok === true && existsSync(join(agentsHome, 'skills', 'flat-import.md')), JSON.stringify(flatImported.payload));
+
+const wrappedZip = makeStoreZip([
+  { path: 'wrapped-skill/SKILL.md', data: '---\nname: wrapped-skill\ndescription: "Use when testing wrapped zip."\n---\n\n# wrapped\n' },
+  { path: 'wrapped-skill/references/a.md', data: '# a\n' },
+]);
+const wrappedImported = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'importSkill', base64: wrappedZip.toString('base64'), filename: 'wrapped.zip', cwd: project,
+});
+check('套一层目录的 ZIP 会被剥层', wrappedImported.payload.ok === true
+  && wrappedImported.payload.name === 'wrapped-skill'
+  && existsSync(join(agentsHome, 'skills', 'wrapped-skill', 'references', 'a.md')), JSON.stringify(wrappedImported.payload));
+
+const traversalZip = makeStoreZip([
+  { path: 'SKILL.md', data: '---\nname: evil-skill\ndescription: "evil"\n---\n\n# evil\n' },
+  { path: '../evil.txt', data: 'x' },
+]);
+trashHarness.setCatalogSkills([]);
+const traversalImport = await callRoute(trashRoute, 'POST', undefined, {
+  op: 'importSkill', base64: traversalZip.toString('base64'), filename: 'evil.zip', cwd: project,
+});
+check('ZIP 路径穿越被拒绝', traversalImport.payload.ok === false && String(traversalImport.payload.error).includes('非法路径'), JSON.stringify(traversalImport.payload));
+check('穿越导入没有落盘任何文件', !existsSync(join(agentsHome, 'skills', 'evil-skill')) && !existsSync(join(agentsHome, 'evil.txt')));
+
 console.log('\n== 降级 ==');
 const minimal = createHarness({ tools: false, webServer: false });
 let minimalThrew;

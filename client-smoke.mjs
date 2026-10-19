@@ -139,16 +139,32 @@ function renderTree(element, path = '0', seen = null) {
 // 浏览器垫片
 // ---------------------------------------------------------------------------
 const styleTags = [];
+/** 导出走 <a download>:记录被点击的下载链接。 */
+const downloads = [];
 globalThis.document = {
   createElement(tag) {
-    return { tag, textContent: '', attributes: {}, setAttribute(k, v) { this.attributes[k] = v; }, remove() { this.removed = true; } };
+    return {
+      tag,
+      textContent: '',
+      attributes: {},
+      href: '',
+      download: '',
+      setAttribute(k, v) { this.attributes[k] = v; },
+      appendChild() {},
+      remove() { this.removed = true; },
+      click() { downloads.push(this); },
+    };
   },
   head: { appendChild(node) { styleTags.push(node); } },
+  body: { appendChild() {}, removeChild() {} },
 };
+globalThis.URL.createObjectURL = () => 'blob:dsh-skill-center-test';
+globalThis.URL.revokeObjectURL = () => {};
 
 const captured = [];
 globalThis.window = {
   location: { origin: ORIGIN },
+  __downloads: downloads,
   __ModuleLoader__: {
     // 宿主 facade 的真实形状:注册队列 + 已注册工厂表。
     factories: new Map(),
@@ -372,6 +388,20 @@ globalThis.fetch = async (input, init) => {
       trashStub = [];
       return { ok: true, status: 200, json: async () => ({ ok: true, removed: 1 }) };
     }
+    if (body.op === 'export') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, name: body.name, filename: `${body.name}.zip`, bytes: 4, base64: 'UEsDBAo=' }),
+      };
+    }
+    if (body.op === 'importSkill') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, name: 'imported-skill', path: 'C:/tmp/skills/imported-skill', rootId: 'user-agents' }),
+      };
+    }
     // 护栏:create / delete 会真的改动技能目录,冒烟测试绝不允许它们跑出去。
     if (body.op === 'delete' || body.op === 'create') {
       throw new Error(`冒烟测试拦下了会改动真实技能目录的请求:${body.op}`);
@@ -476,6 +506,62 @@ const cancelled = await renderRounds(2);
 check('点「取消」后退回「删除」且不再有「确认删除?」/「取消」', deleteButton(cancelled.seen) !== undefined
   && confirmButton(cancelled.seen) === undefined && cancelButton(cancelled.seen) === undefined);
 check('取消过程中没有发出任何 delete 请求', posts.every((body) => body.op !== 'delete'), JSON.stringify(posts.map((body) => body.op)));
+
+// ---------------------------------------------------------------------------
+// 新建表单取消 / 导出 / 导入
+// ---------------------------------------------------------------------------
+console.log(`\n== 新建表单取消 ==`);
+
+const createButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.create);
+const submitButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.createSubmit);
+
+const beforeCreate = await renderRounds(2);
+check('工具栏有「新建技能」', createButton(beforeCreate.seen) !== undefined);
+await createButton(beforeCreate.seen).element.props.onClick();
+const formView = await renderRounds(2);
+check('新建表单出现「创建」与「取消」', submitButton(formView.seen) !== undefined
+  && formView.seen.some(({ element }) => element.type === 'button' && element.props.children === dictZH.cancel));
+check('写入位置有解释文案', formView.text.includes(dictZH.formRoot) && formView.text.includes('~/.agents/skills'), formView.text.slice(0, 200));
+const cancelForm = formView.seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.cancel);
+await cancelForm.element.props.onClick();
+const afterCancelForm = await renderRounds(2);
+check('点「取消」关闭新建表单且回到详情', submitButton(afterCancelForm.seen) === undefined
+  && deleteButton(afterCancelForm.seen) !== undefined);
+
+console.log(`\n== 导出 / 导入 ==`);
+const exportButton = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props.children === dictZH.export);
+const detailView = await renderRounds(2);
+check('可写技能的详情有「导出」', exportButton(detailView.seen) !== undefined);
+await exportButton(detailView.seen).element.props.onClick();
+const afterExport = await renderRounds(4);
+const exportPosts = posts.filter((body) => body.op === 'export');
+check('导出只发一次 export 请求', exportPosts.length === 1 && typeof exportPosts[0].name === 'string', JSON.stringify(exportPosts));
+check('导出触发 .zip 下载', downloads.length === 1 && String(downloads[0].download).endsWith('.zip'), JSON.stringify(downloads.map((item) => item.download)));
+check('导出后没有成功提示条', afterExport.seen.every(({ element }) => !(typeof element.props.className === 'string'
+  && element.props.className.includes('dsh-sc-note-ok'))));
+
+const fileInput = (seen) => seen.find(({ element }) => element.type === 'input' && element.props.type === 'file');
+check('工具栏有导入文件输入', fileInput(detailView.seen) !== undefined);
+const fakeTarget = {
+  value: 'C:\\fakepath\\imported-skill.zip',
+  files: [{
+    name: 'imported-skill.zip',
+    arrayBuffer: async () => new Uint8Array([0x50, 0x4B, 0x03, 0x04]).buffer,
+  }],
+};
+await fileInput(detailView.seen).element.props.onChange({ target: fakeTarget });
+const afterImport = await renderRounds(4);
+const importPosts = posts.filter((body) => body.op === 'importSkill');
+check('导入只发一次 importSkill 请求', importPosts.length === 1, JSON.stringify(importPosts.map((body) => body.filename)));
+check('importSkill 带上文件名与非空 base64', importPosts[0]?.filename === 'imported-skill.zip'
+  && typeof importPosts[0]?.base64 === 'string' && importPosts[0].base64.length > 0, JSON.stringify(importPosts[0]));
+check('选完文件后 input 复位', fakeTarget.value === '');
+check('导入后没有成功提示条', afterImport.seen.every(({ element }) => !(typeof element.props.className === 'string'
+  && element.props.className.includes('dsh-sc-note-ok'))));
 
 // ---------------------------------------------------------------------------
 // 回收站流程:列出 → 恢复 → 退出 → 重新进入 → 清空(二次确认 + 取消)。

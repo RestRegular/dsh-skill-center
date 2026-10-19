@@ -55,6 +55,11 @@ window.__ModuleLoader__.load({
         formDesc: '描述(必填)',
         formBody: '正文(Markdown,可选)',
         formRoot: '写入位置',
+        formRootHint: '写入位置决定技能文件落在哪个根:项目根只对当前仓库生效且优先级最高;用户 Agents 技能(~/.agents/skills)对所有项目生效、按 .agents 约定扫描的其它工具也能复用;用户 DSH 技能(~/.dsh/skills)只在 DSH 里生效,同名时优先于 Agents 技能。',
+        importSkill: '导入技能',
+        importHint: '选择一个 .zip 技能包或单个 .md 技能文件',
+        export: '导出',
+        exportHint: '把技能包导出为 .zip(SKILL.md + 资源文件)',
         delete: '删除',
         deleteConfirm: '确认删除?',
         cancel: '取消',
@@ -116,6 +121,11 @@ window.__ModuleLoader__.load({
         formDesc: 'Description (required)',
         formBody: 'Body (Markdown, optional)',
         formRoot: 'Write to',
+        formRootHint: 'Write-to picks the root: a project root only applies to this repository and outranks the rest; user Agents (~/.agents/skills) applies to every project and is reusable by other tools that scan it; user DSH (~/.dsh/skills) belongs to DeepSeek Harness alone and outranks a same-named Agents skill.',
+        importSkill: 'Import skill',
+        importHint: 'Pick a .zip skill bundle or a single .md skill file',
+        export: 'Export',
+        exportHint: 'Export the bundle as a .zip (SKILL.md plus its resource files)',
         delete: 'Delete',
         deleteConfirm: 'Confirm delete?',
         cancel: 'Cancel',
@@ -618,6 +628,68 @@ window.__ModuleLoader__.load({
           }
         };
 
+        /**
+         * 把当前技能导出成 .zip 并触发下载。文件落盘本身就是反馈,不弹提示。
+         * @param skill - 目录条目。
+         */
+        const exportSkill = async (skill) => {
+          setBusy(true);
+          setError(undefined);
+          try {
+            const payload = await apiPost({ op: 'export', ...pickScope(sessions, scopeCache), name: skill.name });
+            const binary = atob(String(payload.base64 ?? ''));
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+            const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = payload.filename ?? `${skill.name}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          } catch (cause) {
+            setError(String(cause?.message ?? cause));
+          } finally {
+            setBusy(false);
+          }
+        };
+
+        /**
+         * 读用户选的文件,POST 给宿主导入;成功后选中新技能并重读目录。
+         * @param event - file input 的 change 事件。
+         */
+        const importSkillFile = async (event) => {
+          const input = event?.target;
+          const file = input?.files?.[0];
+          if (input !== undefined) input.value = '';
+          if (file === undefined || file === null) return;
+          setBusy(true);
+          setError(undefined);
+          try {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            let binary = '';
+            const chunk = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += chunk) {
+              binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunk));
+            }
+            const payload = await apiPost({
+              op: 'importSkill',
+              ...pickScope(sessions, scopeCache),
+              base64: btoa(binary),
+              filename: file.name,
+            });
+            setSelected(payload.name);
+            setCreating(false);
+            setTrashOpen(false);
+            await load();
+          } catch (cause) {
+            setError(String(cause?.message ?? cause));
+          } finally {
+            setBusy(false);
+          }
+        };
+
         /** 有多少个技能带着未保存的改动。 */
         const pendingCount = Object.keys(pendingEdits).length;
         const saveLabel = pendingCount === 0
@@ -804,6 +876,22 @@ window.__ModuleLoader__.load({
                 setPendingEmpty(false);
               },
             }, t('create')),
+            // 用 <label> 包住隐藏的 file input:点标签就打开文件选择器,不需要 ref。
+            h('label', {
+              key: 'import',
+              className: 'dsh-sc-btn',
+              title: t('importHint'),
+              style: { cursor: 'pointer' },
+            }, [
+              t('importSkill'),
+              h('input', {
+                key: 'file',
+                type: 'file',
+                accept: '.zip,.md,application/zip,text/markdown',
+                style: { display: 'none' },
+                onChange: importSkillFile,
+              }),
+            ]),
             h('button', {
               key: 'refresh',
               type: 'button',
@@ -916,6 +1004,7 @@ window.__ModuleLoader__.load({
             scopeCache,
             sessions,
             onDone: () => { setCreating(false); load(); },
+            onCancel: () => setCreating(false),
             onError: setError,
           });
         } else if (current === undefined) {
@@ -967,6 +1056,14 @@ window.__ModuleLoader__.load({
                 disabled: busy || current.writable !== true,
                 onClick: () => { if (body === undefined) loadBody(current); else setBody(undefined); },
               }, body === undefined ? t('reloadBody') : t('previewHide')),
+              h('button', {
+                key: 'export',
+                type: 'button',
+                className: 'dsh-sc-btn',
+                disabled: busy || current.writable !== true,
+                title: t('exportHint'),
+                onClick: () => exportSkill(current),
+              }, t('export')),
               // 待确认时,"取消"排在"确认删除?"左边:先给退路,再给危险动作。
               pendingDelete ? h('button', {
                 key: 'cancel',
@@ -1024,10 +1121,10 @@ window.__ModuleLoader__.load({
 
     /**
      * 新建技能表单。
-     * @param props - `{ t, catalog, scopeCache, sessions, onDone, onError }`。
+     * @param props - `{ t, catalog, scopeCache, sessions, onDone, onCancel, onError }`。
      * @returns 表单元素。
      */
-    function CreateForm({ t, catalog, scopeCache, sessions, onDone, onError }) {
+    function CreateForm({ t, catalog, scopeCache, sessions, onDone, onCancel, onError }) {
       const [name, setName] = React.useState('');
       const [description, setDescription] = React.useState('');
       const [body, setBody] = React.useState('');
@@ -1077,7 +1174,15 @@ window.__ModuleLoader__.load({
               key: root.id, value: root.id, title: root.path,
             }, `${root.label} — ${root.path}`))),
           ]),
+          h('p', { key: 'rh', className: 'dsh-sc-hint', style: { margin: 0 } }, t('formRootHint')),
           h('div', { key: 'a', className: 'dsh-sc-actions' }, [
+            h('button', {
+              key: 'cancel',
+              type: 'button',
+              className: 'dsh-sc-btn',
+              disabled: busy,
+              onClick: onCancel,
+            }, t('cancel')),
             h('button', {
               key: 'ok',
               type: 'button',

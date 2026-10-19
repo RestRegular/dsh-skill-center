@@ -37,7 +37,8 @@ Sidebar                                   Main area
 | Search / filter | Search by name or description; filter by provider source |
 | Read body | Renders the raw `SKILL.md` Markdown inside the panel (no right-hand resource pane needed) |
 | Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
-| Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root |
+| Create | Creates `<name>/SKILL.md` under the user Agents or user DSH skills root; the form pairs **Create** with **Cancel**, and a hint under **Write to** explains what the choice means |
+| Export / import | **Export** downloads the selected bundle as a `.zip` — `SKILL.md` plus every resource file under it, flat skills become `<name>.md`. **Import skill** accepts that `.zip` (a single wrapping folder is stripped) or a bare `SKILL.md`; it refuses entries whose paths escape the bundle, names that already exist, and files without frontmatter `name` + `description` |
 | Delete | Moves the skill to `.trash/<timestamp>-<name>` in the same root — recoverable, never a hard delete; the confirmation puts **取消 / Cancel** to the left of **确认删除? / Confirm delete?** |
 | Trash | The **Trash** button in the toolbar lists every `.trash` entry across the managed roots, with its root and deletion time. **Restore** renames one back into its original root (refusing to overwrite a skill that already exists there); **Delete** in the detail pane removes the selected entry permanently (after **确认删除?**, Cancel on its left). **Empty trash** sits in the top toolbar and clears every entry, also behind a **确认清空?** step that pairs a **取消 / Cancel** on its left |
 | No success toasts | The panel shows no "saved / created / deleted / restored" notice: the state change itself is the feedback (the save button's three states, a row appearing in or leaving the list, a trash entry leaving the trash). Only failures render, as a red bar with a retry button |
@@ -45,6 +46,21 @@ Sidebar                                   Main area
 | Bundled skill | Ships an embedded **`skill-authoring`** skill (guidance + `references/` + a starter template) that teaches the agent which root a skill belongs in, what the frontmatter contract is, and where a skill's resource files go |
 | Model tool | Registers **`skill_create`**, which writes `<root>/<name>/SKILL.md` plus any resource files in one call — the path that works for skill roots outside the session workspace, where the file-write tools are sandboxed |
 | Security | Every write is confined to managed skill roots that really exist on disk; requests from non-loopback origins get `403` |
+
+### Write location: project roots vs the two user roots
+
+**Write to** (写入位置) is the directory the new skill's files are written into; it decides who can see
+the skill and how it competes with same-named skills. The form only offers the two user roots.
+
+| Choice | Path | Applies to | Notes |
+|---|---|---|---|
+| User Agents skills | `~/.agents/skills` (`$DSH_AGENTS_HOME/skills`) | every project | The cross-agent convention: other tools that scan `~/.agents/skills` see it too. This is the panel's default. |
+| User DSH skills | `~/.dsh/skills` (`$DSH_HOME/skills`) | every project | DeepSeek Harness only. Rank 400, so a same-named skill here shadows the `~/.agents/skills` one (rank 500). |
+
+Project roots — `<projectRoot>/.dsh/skills` (rank 100) and `<projectRoot>/.agents/skills` (rank 200) —
+are not offered in the form (the API and `skill_create` accept them via `rootId`). They only apply to
+that repository and outrank both user roots, which is why a project copy of a skill wins over a user
+copy with the same name.
 
 ## Bundled skill and model tool
 
@@ -127,7 +143,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.5" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.6" }
 }
 ```
 
@@ -212,6 +228,8 @@ The host half mounts a **loopback-only** route at `/dsh-skill-center/api`:
 | POST | `restore` | `rootId` `entry` | rename one `.trash` entry back into its original root; fails instead of overwriting |
 | POST | `deleteTrash` | `rootId` `entry` | permanently delete one `.trash` entry |
 | POST | `emptyTrash` | `sessionId?` `cwd?` `rootId?` | permanently delete trash entries (all managed roots unless `rootId` is given) |
+| POST | `export` | `name` | bundle the skill as a `.zip` and return it as base64 (`filename`, `bytes`) |
+| POST | `importSkill` | `base64` `filename?` `rootId?` | import a `.zip` bundle or a bare `.md`; writes into `rootId` (default `user-agents`) and rejects traversal paths and existing names |
 
 Requests from anything other than `127.0.0.1` / `::1` are rejected with `403`.
 
@@ -330,13 +348,18 @@ skill's invocation policy comes from the file on disk even when the registry sna
 walks the trash round trip through the loopback route: `delete` → `trash` lists the entry with its
 root, `restore` puts a directory bundle and a flat `.md` back, a path-traversal `entry` and an
 existing target are both refused, `deleteTrash` removes exactly one entry (and reports a missing one),
-and `emptyTrash` clears the rest.
+and `emptyTrash` clears the rest. Export/import is a real round trip too: `export` returns a genuine
+ZIP, deleting the skill and importing that base64 restores `SKILL.md` plus its resource, importing the
+same name again is refused, a bare `.md` becomes a flat skill, a `.zip` with one wrapping folder is
+stripped, and a `../` entry is rejected without writing anything.
 
 `client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
 and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
 `setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
 next edit), and a lagging catalog snapshot cannot bounce the switch back. It then walks the delete
 confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. The
+create form's Cancel closes it and returns to the detail; **Export** sends one `export` and clicks a
+`.zip` download; **Import** sends one `importSkill` with the file name and non-empty base64. The
 trash flow is stubbed (GET `trash` answers from a fake entry list; `restore` / `deleteTrash` /
 `emptyTrash` only change it): opening the trash lists the entry, **Restore** sends one `restore` with
 `rootId` + `entry` and leaves the trash empty, leaving and re-entering the trash reloads it, the
@@ -402,7 +425,8 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 搜索 / 筛选 | 按名称或描述搜索；按来源（provider source）筛选 |
 | 查看正文 | 面板内直接读 `SKILL.md` 原文（Markdown 原文，不经过右栏） |
 | 调用开关 | 开关先改本地状态（**点了立刻切换**，不发请求），再按「返回会话」左边的 **保存** 按钮写回 frontmatter（按钮三态：未修改 → 保存 → 已保存，多个技能待保存时显示「保存 (n)」）；写盘后监听器立刻把新目录推给模型 |
-| 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md` |
+| 新建 | 在「用户 Agents 技能」或「用户 DSH 技能」根下创建 `<name>/SKILL.md`；表单里「创建」旁边有「取消」，写入位置下方有选择说明 |
+| 导出 / 导入 | **导出**把选中的技能下载成 `.zip`（`SKILL.md` + 全部资源文件；平坦技能导出为 `<name>.md`）；**导入技能**接受该 `.zip`（自动剥掉外面那层目录）或单个 `SKILL.md`，会拒绝越出技能目录的路径、已存在的名字，以及缺 frontmatter `name` + `description` 的文件 |
 | 删除 | 移动到同根目录的 `.trash/<时间戳>-<名字>`（不硬删）；确认时「取消」排在「确认删除?」**左边** |
 | 回收站 | 工具栏「回收站」列出所有受管根下的 `.trash` 条目（带原技能根与删除时间）；**恢复**把条目移回原技能根（目标已存在时拒绝覆盖），详情区 **删除** 在「取消」+「确认删除?」后永久删除这一条，顶部工具栏 **清空回收站** 在「取消」+「确认清空?」后永久删除全部条目 |
 | 无成功提示 | 面板不再弹「已保存 / 已创建 / 已移动到 .trash / 已恢复」这类提示：状态变化本身就是反馈（保存按钮三态、列表增删一行、回收站条目消失）。只有失败才渲染成红色条 + 重试按钮 |
@@ -410,6 +434,19 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 随包技能 | 附带一个内嵌的 **`skill-authoring`** 指导技能（正文 + `references/` + 起步模板）：技能该放哪个根、frontmatter 契约是什么、资源文件放哪、怎么把技能打进插件包 |
 | 模型工具 | 注册 **`skill_create`**：一次调用写出 `<root>/<name>/SKILL.md` 与全部资源文件 —— 技能根在工作区之外时（文件写入工具被沙箱挡住）这是唯一走得通的路径 |
 | 安全 | 写操作只落在**真实存在于磁盘**的受管技能根内；非回环来源一律 `403` |
+
+### 写入位置：项目根与两个用户根
+
+「写入位置」就是新建技能的 `SKILL.md` 落到哪个目录——它决定技能的可见范围，以及同名时谁盖过谁。
+表单里只提供两个用户根（项目根由 API / `skill_create` 的 `rootId` 指定，面板不提供）。
+
+| 选择 | 路径 | 生效范围 | 说明 |
+|---|---|---|---|
+| 用户 Agents 技能 | `~/.agents/skills`（`$DSH_AGENTS_HOME/skills`） | 所有项目 | 跨 Agent 的通用约定：其它扫描 `~/.agents/skills` 的 Agent 工具也能用。面板默认写这里。 |
+| 用户 DSH 技能 | `~/.dsh/skills`（`$DSH_HOME/skills`） | 所有项目 | 只属于 DeepSeek Harness。rank 400，同名时**优先于** `~/.agents/skills`（rank 500）。 |
+
+项目根 `<projectRoot>/.dsh/skills`（rank 100）与 `<projectRoot>/.agents/skills`（rank 200）只对当前
+仓库生效，且优先级高于两个用户根 —— 所以项目里放一份同名技能就会盖过用户级的那份。
 
 ### 随包技能与模型工具
 
@@ -474,7 +511,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.5" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.6" }
 }
 ```
 
@@ -587,6 +624,10 @@ Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19387/dsh-skill-center/api
 `POST {"op":"deleteTrash","rootId":"user-agents","entry":"<条目名>"}`（永久删这一条）、
 `POST {"op":"emptyTrash"}`（不传 `rootId` 清空全部受管根，传了只清那一个）。
 
+导入导出：`POST {"op":"export","name":"<技能名>"}` 回 `filename` / `bytes` / `base64`（ZIP）；
+`POST {"op":"importSkill","base64":"<ZIP 或单个 .md 的 base64>","filename":"x.zip","rootId":"user-agents"}`
+写进指定根（默认 `user-agents`），越界路径与重名都会被拒绝。
+
 ### 开发
 
 | 改动 | 生效方式 |
@@ -617,12 +658,17 @@ node "$here\verify-skill.mjs"
 显式项目根,以及三条降级路径;另外还断言：受管根技能的调用策略取自磁盘文件,即使注册表快照
 给的是旧值;最后把回收站整条链路真跑一遍：`delete` 之后 `trash` 能列出条目（带原根）,
 `restore` 能把目录包和平坦 `.md` 都移回去,路径穿越的 `entry` 与目标已存在都被拒绝,
-`deleteTrash` 只删指定那一条（对已不存在的条目报错）,`emptyTrash` 清掉剩下的。
+`deleteTrash` 只删指定那一条（对已不存在的条目报错）,`emptyTrash` 清掉剩下的;
+最后跑一遍导入导出往返：`export` 回一个真正的 ZIP,删掉技能后用同一份 base64 `importSkill`
+能还原 `SKILL.md` 与资源,重复导入报「已存在」,裸 `.md` 导成平坦技能,套一层目录的 ZIP 会剥层,
+带 `../` 的 ZIP 被拒绝且不落盘。
 
 `client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
 拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
 未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
 还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete 请求;
+新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次 `export` 并触发 `.zip`
+下载,**导入**选中文件后发一次带文件名与非空 base64 的 `importSkill`;
 接着走回收站流程（`trash` / `restore` / `deleteTrash` / `emptyTrash` 全部走桩）:打开回收站列出条目、
 **恢复**只发一次带 `rootId` + `entry` 的 `restore` 且回收站变空、退出再进入会重新读,
 详情区 **删除** 要先过「确认删除?」且「取消」在左边（取消不发请求,确认才发一次 `deleteTrash`）,
