@@ -145,7 +145,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.7" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.8" }
 }
 ```
 
@@ -311,6 +311,13 @@ the original three-step follow (session shown in the main area → last hit → 
 picking a session explicitly does not update that cache, so switching back to Auto returns to the
 followed session instead of sticking to the manual choice.
 
+The whole client bundle is wrapped in an IIFE. Plugin bundles are classic scripts in one page and share
+a single global lexical environment that survives a plugin's removal, so re-installing or upgrading the
+plugin while the page is open re-executes the script in the same realm: a top-level `const MODULE_ID`
+would throw `Identifier 'MODULE_ID' has already been declared`, skip the whole script, register no
+factory, and the sidebar row would only come back after a page reload. `client-smoke.mjs` executes the
+bundle twice in one `vm` global-script context to keep this from regressing.
+
 ## Development
 
 ```bash
@@ -367,7 +374,9 @@ and then drives the staged-save flow: the switch flips with no write request, Sa
 next edit), and a lagging catalog snapshot cannot bounce the switch back. It also checks the Scope
 dropdown: it is disabled (with the save-first hint) while edits are staged, lists Auto plus both
 sessions, sends the picked session id and cwd on the next `list` and on an `export`, and goes back to
-the followed session when set to Auto again. It then walks the delete
+the followed session when set to Auto again. The bundle is also run twice inside one `vm` global-script
+context — the page realm of a reinstall — where the second run must neither throw a redeclaration
+error nor register a second factory. It then walks the delete
 confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. The
 create form's Cancel closes it and returns to the detail; **Export** sends one `export` and clicks a
 `.zip` download; **Import** sends one `importSkill` with the file name and non-empty base64. The
@@ -525,7 +534,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.7" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.8" }
 }
 ```
 
@@ -621,6 +630,12 @@ ctx.slots.inject('main', () => ctx.slots.register({
 「自动」保持原来的三步跟随（主区域会话 → 上次命中 → 最近更新）；显式选择不更新那份缓存，
 所以切回「自动」会回到原来跟随的会话，而不是粘在手动选择上。
 
+整个客户端 bundle 包在 IIFE 里。各插件的 bundle 是同一页面里的**经典脚本**，共享一个全局词法
+作用域，而且这个作用域不会随插件卸载消失：页面开着时重装/升级插件，新 bundle 会在同一个 realm
+里再执行一次，顶层 `const MODULE_ID` 会抛 `Identifier 'MODULE_ID' has already been declared`，
+整个脚本不执行、工厂注册不上，侧栏那一行要刷新页面才回来。`client-smoke.mjs` 现在会在同一个
+`vm` 全局脚本上下文里执行两遍 bundle，防止这个回归。
+
 ### API 示例
 
 ```powershell
@@ -687,9 +702,10 @@ node "$here\verify-skill.mjs"
 未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
 然后验证**会话作用域下拉**:有未保存改动时禁用并提示先保存、选项里同时有「自动」和两个会话、
 切到第二个会话后下一次 `list` 与一次 `export` 都带上它的 `sessionId`/`cwd`、切回「自动」回到原来的
-跟随会话;还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete
-请求;新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次 `export` 并触发 `.zip`
-下载,**导入**选中文件后发一次带文件名与非空 base64 的 `importSkill`;
+跟随会话;并在同一个 `vm` 全局脚本上下文里把 bundle 执行两遍(模拟页面开着时重装),第二遍既不抛
+重声明错误、也不产生第二次注册;还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回
+「删除」且不发任何 delete 请求;新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次
+`export` 并触发 `.zip` 下载,**导入**选中文件后发一次带文件名与非空 base64 的 `importSkill`;
 接着走回收站流程（`trash` / `restore` / `deleteTrash` / `emptyTrash` 全部走桩）:打开回收站列出条目、
 **恢复**只发一次带 `rootId` + `entry` 的 `restore` 且回收站变空、退出再进入会重新读,
 详情区 **删除** 要先过「确认删除?」且「取消」在左边（取消不发请求,确认才发一次 `deleteTrash`）,

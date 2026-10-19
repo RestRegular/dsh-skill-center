@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { createContext, runInContext } from 'node:vm';
 
 const ORIGIN = process.env.DSH_ORIGIN ?? 'http://127.0.0.1:19387';
 const CLIENT_PATH = new URL('./client/client.js', import.meta.url);
@@ -218,6 +219,32 @@ try {
 }
 check('重复执行同一 bundle 不抛异常', secondRunError === undefined, String(secondRunError));
 check('重复执行不产生第二次注册', captured.length === 1, `got ${captured.length}`);
+
+// 浏览器式回归:各插件 bundle 是同一页面里的**经典脚本**,共享全局词法作用域。
+// 插件在页面已打开时被重装/升级,新 bundle 会在同一个 realm 里再执行一次 ——
+// 顶层 const/let 重名就是 SyntaxError,整个脚本不执行、工厂注册不上,
+// 表现正是「侧栏少了这一行,刷新页面才恢复」。这里用 vm 的全局脚本上下文复现。
+console.log(`\n== 同一页面重复执行 ==`);
+const realmLoads = [];
+const realm = createContext({
+  window: {
+    __ModuleLoader__: {
+      factories: new Map(),
+      load(realmModule) {
+        this.factories.set(realmModule.id, realmModule);
+        realmLoads.push(realmModule.id);
+      },
+    },
+  },
+});
+const runInRealm = () => runInContext(source, realm);
+let realmFirstError;
+try { runInRealm(); } catch (error) { realmFirstError = error; }
+check('浏览器式全局脚本里执行一次不抛错', realmFirstError === undefined, String(realmFirstError));
+let realmSecondError;
+try { runInRealm(); } catch (error) { realmSecondError = error; }
+check('同一 realm 再执行一次不抛 "Identifier … already been declared"', realmSecondError === undefined, String(realmSecondError));
+check('同一 realm 再执行一次不重复注册', realmLoads.length === 1, JSON.stringify(realmLoads));
 
 const face = module.factory(mockRequire);
 check('工厂返回 {apply, inject}', typeof face.apply === 'function' && Array.isArray(face.inject), JSON.stringify(face.inject));

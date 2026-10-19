@@ -15,7 +15,14 @@
  *
  * 数据与写操作全部走宿主同源回环路由 `/dsh-skill-center/api`(见 ../lib/index.js)。
  * 样式只用宿主主题令牌 `--dsw-*`,不 import 任何 Harness Client 包。
+ *
+ * 整个文件包在 IIFE 里:client bundle 是宿主拼进同一页面的**经典脚本**,顶层
+ * const/let 进入共享的全局词法作用域,而且**不会随 HMR/卸载消失**。插件在页面
+ * 已打开时被重装或升级,新 bundle 会在同一个 realm 里再执行一次,顶层
+ * `const MODULE_ID` 会直接抛 `Identifier 'MODULE_ID' has already been declared`,
+ * 整个脚本不执行、工厂不注册 —— 表现就是侧栏少了这一行,刷新页面才恢复。
  */
+(() => {
 const MODULE_ID = '@restregular/dsh-skill-center';
 
 /** 该 id 是否已经注册过工厂(宿主 facade 暴露 factories 表;取不到就当作没注册)。 */
@@ -1384,3 +1391,5 @@ window.__ModuleLoader__.load({
   },
 });
 }
+})();
+
