@@ -7,10 +7,11 @@
 
 **English** · [中文](#中文)
 
-A Skill Center panel for **DeepSeek Harness**: browse every skill the current session can see,
-read its `SKILL.md`, flip the model/user invocation switches, create and delete skills — without
-leaving the app and without hand-editing frontmatter. The package ships `icon.svg` for the plugin
-manager and uses the same lightning mark for the sidebar entry, so the row and the plugin card match.
+A Skill Center panel for **DeepSeek Harness**: browse every skill a session can see, switch which
+session scope the panel follows, read its `SKILL.md`, flip the model/user invocation switches, create
+and delete skills — without leaving the app and without hand-editing frontmatter. The package ships
+`icon.svg` for the plugin manager and uses the same lightning mark for the sidebar entry, so the row
+and the plugin card match.
 
 > [!NOTE]
 > The npm name `dsh-skill-center` is taken by an unrelated project, so this plugin is published as
@@ -34,6 +35,7 @@ Sidebar                                   Main area
 | Capability | Detail |
 |---|---|
 | Browse | Lists every skill visible in the **current session scope**, including skills embedded in plugins, each with provider, source root and invocation policy |
+| Switch scope | The **Scope** dropdown in the toolbar browses another session's skill scope: **Auto (current session)** keeps the original follow-the-main-view pick, while any listed session makes `list` and every write resolve from that session's cwd and preset. It is disabled while invocation edits are staged, so a switch can never carry them into a different scope |
 | Search / filter | Search by name or description; filter by provider source |
 | Read body | Renders the raw `SKILL.md` Markdown inside the panel (no right-hand resource pane needed) |
 | Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
@@ -303,6 +305,12 @@ second, and the Save button's three states are derived from the staged set (`pen
 "saved once" flag. After a save the overrides are kept until a fresh catalog actually agrees with them
 (`load()` drops the ones that match), so a lagging host snapshot can never bounce the UI back.
 
+The Scope dropdown builds its candidates from `sessions.list` — non-subagent sessions, 50 most recent
+first — and sends the picked `sessionId` / `cwd` with every request, reads and writes alike. Auto keeps
+the original three-step follow (session shown in the main area → last hit → most recently updated);
+picking a session explicitly does not update that cache, so switching back to Auto returns to the
+followed session instead of sticking to the manual choice.
+
 ## Development
 
 ```bash
@@ -356,7 +364,10 @@ stripped, and a `../` entry is rejected without writing anything.
 `client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
 and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
 `setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
-next edit), and a lagging catalog snapshot cannot bounce the switch back. It then walks the delete
+next edit), and a lagging catalog snapshot cannot bounce the switch back. It also checks the Scope
+dropdown: it is disabled (with the save-first hint) while edits are staged, lists Auto plus both
+sessions, sends the picked session id and cwd on the next `list` and on an `export`, and goes back to
+the followed session when set to Auto again. It then walks the delete
 confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. The
 create form's Cancel closes it and returns to the detail; **Export** sends one `export` and clicks a
 `.zip` download; **Import** sends one `importSkill` with the file name and non-empty base64. The
@@ -393,6 +404,8 @@ version fails with `E409 Cannot publish over previously staged version <version>
 - Only **filesystem-backed** skills can be managed; skills embedded in plugins are read-only.
 - With no session selected the panel degrades to "read by working directory" and can only see
   embedded skills plus that cwd's project skills; the footer shows the effective cwd and scope tier.
+- The Scope dropdown lists at most the 50 most recently active non-subagent sessions; an older
+  session can still be read through the API by passing its `sessionId`.
 - Catalog replacement is all-or-nothing: one switch change makes the host resend the whole skill
   catalog message (a Harness design choice, not this plugin's).
 - `skill_create` is registered host-wide, so every agent sees one more tool schema; it has no
@@ -410,8 +423,8 @@ version fails with `E409 Cannot publish over previously staged version <version>
 ## 中文
 
 **DeepSeek Harness 的技能管理面板**：在首页侧栏「新会话」下方的「插件」入口下面加一行「技能中心」，
-点开后中央区域显示面板，用来查看和改写当前会话能看到的技能。包内 `icon.svg` 供插件管理器使用，
-侧栏入口用同一枚闪电记号，两处视觉一致。
+点开后中央区域显示面板，用来查看和改写任意会话能看到的技能（默认跟随当前会话，可在工具栏切换作用域）。
+包内 `icon.svg` 供插件管理器使用，侧栏入口用同一枚闪电记号，两处视觉一致。
 
 > [!NOTE]
 > npm 上的 `dsh-skill-center` 已被另一个无关项目占用，所以本插件发布为
@@ -422,6 +435,7 @@ version fails with `E409 Cannot publish over previously staged version <version>
 | 能力 | 说明 |
 |---|---|
 | 浏览 | 列出**当前会话作用域**下模型/用户能看到的所有技能（含插件内嵌技能），带提供方、来源根、调用策略 |
+| 切换作用域 | 工具栏的**作用域**下拉可以查看另一个会话的技能目录：**自动(当前会话)** 沿用原来「主区域会话 → 最近会话」的跟随逻辑；选中某个会话后，`list` 与全部写操作都按该会话的 cwd 与预设解析。有未保存的开关改动时下拉禁用，改动不会落到另一个作用域 |
 | 搜索 / 筛选 | 按名称或描述搜索；按来源（provider source）筛选 |
 | 查看正文 | 面板内直接读 `SKILL.md` 原文（Markdown 原文，不经过右栏） |
 | 调用开关 | 开关先改本地状态（**点了立刻切换**，不发请求），再按「返回会话」左边的 **保存** 按钮写回 frontmatter（按钮三态：未修改 → 保存 → 已保存，多个技能待保存时显示「保存 (n)」）；写盘后监听器立刻把新目录推给模型 |
@@ -602,6 +616,11 @@ ctx.slots.inject('main', () => ctx.slots.register({
 直到某次 `list` 的快照真的与它一致（`load()` 只撤销已经追平的那些）——
 所以宿主的目录快照慢半拍也不会把界面弹回去。
 
+作用域下拉从 `sessions.list` 取候选（排除子 Agent 会话，最多最近 50 个），把选中的
+`sessionId` / `cwd` 带给每个请求（读目录、回收站、开关保存、删除、导入导出都一样）。
+「自动」保持原来的三步跟随（主区域会话 → 上次命中 → 最近更新）；显式选择不更新那份缓存，
+所以切回「自动」会回到原来跟随的会话，而不是粘在手动选择上。
+
 ### API 示例
 
 ```powershell
@@ -666,8 +685,10 @@ node "$here\verify-skill.mjs"
 `client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
 拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
 未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
-还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete 请求;
-新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次 `export` 并触发 `.zip`
+然后验证**会话作用域下拉**:有未保存改动时禁用并提示先保存、选项里同时有「自动」和两个会话、
+切到第二个会话后下一次 `list` 与一次 `export` 都带上它的 `sessionId`/`cwd`、切回「自动」回到原来的
+跟随会话;还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回「删除」且不发任何 delete
+请求;新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次 `export` 并触发 `.zip`
 下载,**导入**选中文件后发一次带文件名与非空 base64 的 `importSkill`;
 接着走回收站流程（`trash` / `restore` / `deleteTrash` / `emptyTrash` 全部走桩）:打开回收站列出条目、
 **恢复**只发一次带 `rootId` + `entry` 的 `restore` 且回收站变空、退出再进入会重新读,
@@ -696,6 +717,7 @@ node "$here\verify-skill.mjs"
 - 只能管理**文件系统来源**的技能；插件内嵌技能只读。
 - 没有选中会话时退化为「按工作目录读取」，此时只能看到内嵌技能 + 该 cwd 的项目技能；
   面板底栏会显示实际使用的 cwd 与作用域级别。
+- 作用域下拉最多列出最近活动的 50 个非子 Agent 会话；更早的会话仍可通过 API 传 `sessionId` 访问。
 - 目录整体替换制：一次开关改动会让模型的技能目录消息整条重发（这是 Harness 自身的设计）。
 - `skill_create` 是宿主级全局注册：每个 Agent 都会多看到一份工具 schema，没有按 Agent 的开关，
   只有卸载插件才会消失。

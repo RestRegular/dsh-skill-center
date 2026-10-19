@@ -90,6 +90,10 @@ window.__ModuleLoader__.load({
         scopeLive: '当前会话作用域',
         scopePreset: '会话预设作用域',
         scopeCwd: '未绑定会话,按工作目录读取',
+        scopeLabel: '作用域',
+        scopeAuto: '自动(当前会话)',
+        scopeHint: '切换要查看的会话作用域:技能按所选会话的 cwd 与预设解析',
+        scopePending: '先保存未保存的调用开关改动,再切换作用域',
         filterAll: '全部来源',
         total: '{n} 个技能',
         shown: '显示 {n} / {m}',
@@ -156,6 +160,10 @@ window.__ModuleLoader__.load({
         scopeLive: 'Current session scope',
         scopePreset: 'Session preset scope',
         scopeCwd: 'No session bound; read from the working directory',
+        scopeLabel: 'Scope',
+        scopeAuto: 'Auto (current session)',
+        scopeHint: 'Switch the session scope being browsed: skills resolve from that session\'s cwd and preset',
+        scopePending: 'Save the pending invocation changes before switching scope',
         filterAll: 'All sources',
         total: '{n} skills',
         shown: 'Showing {n} of {m}',
@@ -208,6 +216,8 @@ window.__ModuleLoader__.load({
 .dsh-sc-sub{color:var(--dsw-alias-label-tertiary);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-sc-spacer{flex:1}
 .dsh-sc-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-sc-scope{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:280px}
+.dsh-sc-scope .dsh-sc-select{max-width:230px;min-width:0;text-overflow:ellipsis}
 .dsh-sc-input{flex:1;min-width:140px;padding:6px 10px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit;outline:none}
 .dsh-sc-input:focus-visible{border-color:var(--dsw-alias-state-business-primary)}
 .dsh-sc-select{padding:6px 8px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit}
@@ -300,17 +310,74 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 选一个会话作为作用域来源:优先"主区域正在显示的会话",否则最近更新的会话。
-     * 面板本身占用主区域,切过来之后 mainView 归属可能已经让出,
+     * 目录里展示用的工作区名(路径最后一段;兼容 Windows 盘符与 POSIX)。
+     * @param cwd - 会话工作目录。
+     * @returns 最后一段路径,取不到时 undefined。
+     */
+    function workspaceNameOf(cwd) {
+      if (typeof cwd !== 'string' || cwd === '') return undefined;
+      const parts = cwd.split(/[\\/]+/u).filter((part) => part !== '');
+      return parts.length === 0 ? undefined : parts[parts.length - 1];
+    }
+
+    /**
+     * 把客户端会话目录投影成作用域下拉的候选。
+     *
+     * 技能作用域由「会话 cwd + 会话预设」共同决定,所以候选按会话(而不是按工作区)
+     * 列出:同一工作区里的两个会话若挂的是不同预设,技能目录本来就可能不同。
+     * 子 Agent 会话不在这里出现 —— 它们是父会话的延伸,不是用户要切换的浏览对象。
+     * 列表按最近活动排序并截断,避免几百个历史会话把下拉撑爆。
+     *
+     * @param sessions - 客户端 sessions 服务。
+     * @returns `[{ id, label, cwd }]`。
+     */
+    function scopeOptionsOf(sessions) {
+      let rows = [];
+      try {
+        const snapshot = sessions?.list?.getSnapshot?.();
+        rows = Object.values(snapshot?.byId ?? {});
+      } catch {
+        /* 会话服务不可用时只留"自动" */
+      }
+      const options = rows
+        .filter((row) => row?.id !== undefined && row.origin !== 'subagent' && row.parentId === undefined)
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+        .slice(0, 50)
+        .map((row) => {
+          const id = String(row.id);
+          const base = String(row.displayTitle ?? row.title ?? id);
+          const workspace = workspaceNameOf(row.cwd);
+          const label = workspace === undefined || workspace === base ? base : `${base} · ${workspace}`;
+          return { id, label, cwd: row.cwd };
+        });
+      // 同工作区里未命名的会话会重名:给重名项补一段 id,仍然一眼能区分。
+      const used = new Map();
+      for (const option of options) {
+        const count = used.get(option.label) ?? 0;
+        used.set(option.label, count + 1);
+        if (count > 0) option.label = `${option.label} (${option.id.slice(-6)})`;
+      }
+      return options;
+    }
+
+    /**
+     * 选一个会话作为作用域来源:用户显式选中的会话优先;否则"主区域正在显示的会话",
+     * 再否则最近更新的会话。面板本身占用主区域,切过来之后 mainView 归属可能已经让出,
      * 所以命中的结果会缓存下来供后续刷新复用。
      * @param sessions - 客户端 sessions 服务。
      * @param cache - 记忆上一次命中的会话 id 与 cwd。
+     * @param pinned - 用户在下拉里选中的会话 id;空串/未命中表示自动。
      * @returns `{ sessionId, cwd }`。
      */
-    function pickScope(sessions, cache) {
+    function pickScope(sessions, cache, pinned) {
       try {
         const snapshot = sessions?.list?.getSnapshot?.();
         const byId = snapshot?.byId ?? {};
+        // 显式选中时不更新 auto 缓存:切回"自动"时应该回到原来的跟随对象。
+        if (typeof pinned === 'string' && pinned !== ''
+          && Object.prototype.hasOwnProperty.call(byId, pinned)) {
+          return { sessionId: pinned, cwd: byId[pinned]?.cwd };
+        }
         const entries = Object.entries(byId);
         const main = entries.find(([, row]) => (row?.retainedBy?.mainView ?? 0) > 0);
         if (main !== undefined) {
@@ -462,12 +529,22 @@ window.__ModuleLoader__.load({
         const [pendingEmpty, setPendingEmpty] = React.useState(false);
         /** 回收站里的"删除"是否已进入二次确认。 */
         const [pendingTrashDelete, setPendingTrashDelete] = React.useState(false);
+        /** 用户在作用域下拉里显式选中的会话 id;空串 = 自动。 */
+        const [scopeSessionId, setScopeSessionId] = React.useState('');
+        const scopeOptions = scopeOptionsOf(sessions);
+        /**
+         * 真正生效的作用域:选中的会话已经不在会话目录里(归档/删除)时回落到自动,
+         * 免得下拉停在一个不存在的选项上、请求却还带着旧 id。
+         */
+        const scopeValue = scopeOptions.some((option) => option.id === scopeSessionId)
+          ? scopeSessionId
+          : '';
 
         const load = React.useCallback(async () => {
           setBusy(true);
           setError(undefined);
           try {
-            const payload = await apiGet('list', pickScope(sessions, scopeCache));
+            const payload = await apiGet('list', pickScope(sessions, scopeCache, scopeValue));
             setCatalog(payload);
             setSelected((previous) => previous ?? payload.skills[0]?.name);
             // 快照已经追平本地面板值的字段就地撤销覆盖,覆盖集合只留"宿主还没追上"的部分。
@@ -498,7 +575,7 @@ window.__ModuleLoader__.load({
           } finally {
             setBusy(false);
           }
-        }, [sessions]);
+        }, [sessions, scopeValue]);
 
         React.useEffect(() => { load(); }, [load]);
 
@@ -507,7 +584,7 @@ window.__ModuleLoader__.load({
          */
         const loadTrash = React.useCallback(async () => {
           try {
-            const payload = await apiGet('trash', pickScope(sessions, scopeCache));
+            const payload = await apiGet('trash', pickScope(sessions, scopeCache, scopeValue));
             const entries = Array.isArray(payload.entries) ? payload.entries : [];
             setTrash(entries);
             setSelectedTrash((previous) => {
@@ -519,7 +596,7 @@ window.__ModuleLoader__.load({
           } catch (cause) {
             setError(String(cause?.message ?? cause));
           }
-        }, [sessions]);
+        }, [sessions, scopeValue]);
 
         const skills = catalog?.skills ?? [];
         const sources = Array.from(new Set(skills.map((skill) => skill.source).filter(Boolean))).sort();
@@ -545,6 +622,36 @@ window.__ModuleLoader__.load({
         const scopeText = catalog === undefined ? ''
           : catalog.tier === 'process-cwd' || catalog.tier === 'global' ? t('scopeCwd')
             : catalog.tier === 'preset-scope' ? t('scopePreset') : t('scopeLive');
+
+        /**
+         * 切换浏览的会话作用域。
+         *
+         * 切换会换掉整份技能目录(以及写操作解析出的项目根),所以旧的选中项、
+         * 正文预览、删除确认与回收站视图全部作废;有未保存的开关改动时下拉是禁用的,
+         * 不会走到这里把改动悄悄丢掉。目录先清成 undefined,渲染出"正在读取",
+         * 避免新选择器下面短暂挂着上一个作用域的技能列表;真正的重读由
+         * `load` 的依赖(scopeValue)变化触发。
+         * @param event - 下拉的 change 事件。
+         */
+        const switchScope = (event) => {
+          const next = String(event?.target?.value ?? '');
+          if (next === scopeValue) return;
+          setScopeSessionId(next);
+          setCatalog(undefined);
+          setSelected(undefined);
+          setBody(undefined);
+          setPendingDelete(false);
+          setPendingEdits({});
+          setShownEdits({});
+          setSavedOnce(false);
+          setCreating(false);
+          setTrashOpen(false);
+          setTrash(undefined);
+          setSelectedTrash(undefined);
+          setPendingEmpty(false);
+          setPendingTrashDelete(false);
+          setError(undefined);
+        };
 
         /**
          * 跑一个写操作,然后重读目录。成功不弹任何提示:面板本身的状态变化
@@ -612,7 +719,7 @@ window.__ModuleLoader__.load({
               const target = { ...shownInvocation(skill), ...patch };
               await apiPost({
                 op: 'setInvocation',
-                ...pickScope(sessions, scopeCache),
+                ...pickScope(sessions, scopeCache, scopeValue),
                 name,
                 modelInvocable: target.modelInvocable,
                 userInvocable: target.userInvocable,
@@ -636,7 +743,7 @@ window.__ModuleLoader__.load({
           setBusy(true);
           setError(undefined);
           try {
-            const payload = await apiPost({ op: 'export', ...pickScope(sessions, scopeCache), name: skill.name });
+            const payload = await apiPost({ op: 'export', ...pickScope(sessions, scopeCache, scopeValue), name: skill.name });
             const binary = atob(String(payload.base64 ?? ''));
             const bytes = new Uint8Array(binary.length);
             for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -675,7 +782,7 @@ window.__ModuleLoader__.load({
             }
             const payload = await apiPost({
               op: 'importSkill',
-              ...pickScope(sessions, scopeCache),
+              ...pickScope(sessions, scopeCache, scopeValue),
               base64: btoa(binary),
               filename: file.name,
             });
@@ -698,7 +805,7 @@ window.__ModuleLoader__.load({
 
         const removeSkill = (skill) => mutate(
           async () => {
-            await apiPost({ op: 'delete', ...pickScope(sessions, scopeCache), name: skill.name });
+            await apiPost({ op: 'delete', ...pickScope(sessions, scopeCache, scopeValue), name: skill.name });
             setSelected(undefined);
             setBody(undefined);
             setPendingDelete(false);
@@ -742,7 +849,7 @@ window.__ModuleLoader__.load({
         const restoreEntry = (entry) => mutate(async () => {
           await apiPost({
             op: 'restore',
-            ...pickScope(sessions, scopeCache),
+            ...pickScope(sessions, scopeCache, scopeValue),
             rootId: entry.rootId,
             entry: entry.entry,
           });
@@ -756,7 +863,7 @@ window.__ModuleLoader__.load({
         const removeTrashEntry = (entry) => mutate(async () => {
           await apiPost({
             op: 'deleteTrash',
-            ...pickScope(sessions, scopeCache),
+            ...pickScope(sessions, scopeCache, scopeValue),
             rootId: entry.rootId,
             entry: entry.entry,
           });
@@ -767,7 +874,7 @@ window.__ModuleLoader__.load({
 
         /** 清空回收站(已确认):永久删除所有条目,再重读两边的状态。 */
         const emptyTrash = () => mutate(async () => {
-          await apiPost({ op: 'emptyTrash', ...pickScope(sessions, scopeCache) });
+          await apiPost({ op: 'emptyTrash', ...pickScope(sessions, scopeCache, scopeValue) });
           setPendingEmpty(false);
           setPendingTrashDelete(false);
           await loadTrash();
@@ -777,7 +884,7 @@ window.__ModuleLoader__.load({
           setBusy(true);
           setError(undefined);
           try {
-            const payload = await apiPost({ op: 'read', ...pickScope(sessions, scopeCache), name: skill.name });
+            const payload = await apiPost({ op: 'read', ...pickScope(sessions, scopeCache, scopeValue), name: skill.name });
             setBody(payload.text);
           } catch (cause) {
             setError(String(cause?.message ?? cause));
@@ -839,6 +946,27 @@ window.__ModuleLoader__.load({
             }, t('back')),
           ]),
           h('div', { className: 'dsh-sc-tools', key: 'r2' }, [
+            // 作用域选择:默认"自动"沿用原来的跟随逻辑(主区域会话 → 最近会话),
+            // 选中某个会话后,读目录与所有写操作都改用它解析 cwd/预设。
+            h('div', { key: 'scope', className: 'dsh-sc-scope' }, [
+              h('span', { key: 'l', className: 'dsh-sc-hint' }, t('scopeLabel')),
+              h('select', {
+                key: 's',
+                className: 'dsh-sc-select',
+                value: scopeValue,
+                'aria-label': t('scopeLabel'),
+                title: pendingCount > 0 ? t('scopePending') : t('scopeHint'),
+                disabled: busy || pendingCount > 0,
+                onChange: switchScope,
+              }, [
+                h('option', { key: '__auto', value: '' }, t('scopeAuto')),
+                ...scopeOptions.map((option) => h('option', {
+                  key: option.id,
+                  value: option.id,
+                  title: option.cwd ?? '',
+                }, option.label)),
+              ]),
+            ]),
             h('input', {
               key: 'q',
               type: 'search',
@@ -1003,6 +1131,7 @@ window.__ModuleLoader__.load({
             catalog,
             scopeCache,
             sessions,
+            pinnedScope: scopeValue,
             onDone: () => { setCreating(false); load(); },
             onCancel: () => setCreating(false),
             onError: setError,
@@ -1121,10 +1250,10 @@ window.__ModuleLoader__.load({
 
     /**
      * 新建技能表单。
-     * @param props - `{ t, catalog, scopeCache, sessions, onDone, onCancel, onError }`。
+     * @param props - `{ t, catalog, scopeCache, sessions, pinnedScope, onDone, onCancel, onError }`。
      * @returns 表单元素。
      */
-    function CreateForm({ t, catalog, scopeCache, sessions, onDone, onCancel, onError }) {
+    function CreateForm({ t, catalog, scopeCache, sessions, pinnedScope, onDone, onCancel, onError }) {
       const [name, setName] = React.useState('');
       const [description, setDescription] = React.useState('');
       const [body, setBody] = React.useState('');
@@ -1136,7 +1265,7 @@ window.__ModuleLoader__.load({
         try {
           await apiPost({
             op: 'create',
-            ...pickScope(sessions, scopeCache),
+            ...pickScope(sessions, scopeCache, pinnedScope),
             name,
             description,
             body,

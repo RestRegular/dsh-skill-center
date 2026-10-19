@@ -245,6 +245,9 @@ const slots = {
 /** 真实会话 id(由调用方传入),用来走"活会话/预设作用域"那条路径。 */
 const REAL_SESSION = process.env.DSH_SMOKE_SESSION ?? 'session-smoke-1';
 const REAL_CWD = process.env.DSH_SMOKE_CWD ?? process.cwd();
+/** 第二个会话:只用于作用域切换(切换后的 list/trash 请求会被桩拦下,不落真实宿主)。 */
+const OTHER_SESSION = 'session-smoke-other';
+const OTHER_CWD = 'C:\\tmp\\other-workspace';
 
 const ctx = {
   get(service) {
@@ -254,7 +257,20 @@ const ctx = {
         list: {
           getSnapshot: () => ({
             byId: {
-              [REAL_SESSION]: { id: REAL_SESSION, cwd: REAL_CWD, retainedBy: { mainView: 1 }, updatedAt: 1 },
+              [REAL_SESSION]: {
+                id: REAL_SESSION,
+                displayTitle: '主会话',
+                cwd: REAL_CWD,
+                retainedBy: { mainView: 1 },
+                updatedAt: 2,
+              },
+              [OTHER_SESSION]: {
+                id: OTHER_SESSION,
+                displayTitle: 'other-workspace',
+                cwd: OTHER_CWD,
+                retainedBy: {},
+                updatedAt: 1,
+              },
             },
           }),
         },
@@ -672,6 +688,113 @@ check('确认后只发一次 emptyTrash', emptyPosts.length === 1, JSON.stringif
 check('清空后回收站显示为空', afterEmpty.text.includes(dictZH.trashEmpty), afterEmpty.text.slice(0, 160));
 check('回收站流程全程没有成功提示条', afterEmpty.seen.every(({ element }) => !(typeof element.props.className === 'string'
   && element.props.className.includes('dsh-sc-note-ok'))));
+
+// ---------------------------------------------------------------------------
+// 会话作用域切换:下拉列出会话;选中后 list/写操作都带上该会话。
+// 切换后的 GET list 全部走桩,绝不把假会话 id 发给真实宿主。
+// ---------------------------------------------------------------------------
+console.log(`\n== 会话作用域切换 ==`);
+
+/** 作用域下拉(用 aria-label 认,免得和来源筛选的 select 混淆)。 */
+const scopeSelect = (seen) => seen.find(({ element }) => element.type === 'select'
+  && element.props['aria-label'] === dictZH.scopeLabel);
+const workspaceOf = (path) => String(path).split(/[\\/]+/u).filter(Boolean).pop();
+const optionsOf = (seen) => seen.filter(({ element }) => element.type === 'option').map(({ element }) => element.props);
+
+// 此刻还有一处未保存的开关改动(保存流程之后又拨了一次):切换必须被挡住,
+// 否则改动会悄悄落到另一个作用域的技能上。
+const intro = await renderRounds(2);
+const scopeIntro = scopeSelect(intro.seen);
+check('工具栏有会话作用域下拉', scopeIntro !== undefined);
+check('未保存改动时作用域下拉禁用且提示先保存', scopeIntro?.element.props.disabled === true
+  && scopeIntro?.element.props.title === dictZH.scopePending,
+`disabled=${String(scopeIntro?.element.props.disabled)} title=${String(scopeIntro?.element.props.title)}`);
+
+// 先保存,再退出回收站(回收站视图里也能切,但这里回到技能列表再看下拉)。
+await saveButton(intro.seen).element.props.onClick();
+const savedForScope = await renderRounds(8);
+check('保存后作用域下拉恢复可用', scopeSelect(savedForScope.seen)?.element.props.disabled === false,
+  String(scopeSelect(savedForScope.seen)?.element.props.disabled));
+const scopeBack = backToListButton(savedForScope.seen);
+if (scopeBack !== undefined) await scopeBack.element.props.onClick();
+const scopeReady = await renderRounds(2);
+const scopeOptions = optionsOf(scopeReady.seen).filter((props) => props.value !== undefined
+  && (props.value === '' || props.value === REAL_SESSION || props.value === OTHER_SESSION));
+check('作用域下拉有「自动(当前会话)」', scopeOptions.some((props) => props.value === '' && props.children === dictZH.scopeAuto),
+  JSON.stringify(scopeOptions));
+check('作用域下拉列出当前会话(带工作区名)', scopeOptions.some((props) => props.value === REAL_SESSION
+  && String(props.children).startsWith('主会话 · ' + workspaceOf(REAL_CWD))), JSON.stringify(scopeOptions));
+check('作用域下拉列出另一个会话', scopeOptions.some((props) => props.value === OTHER_SESSION
+  && props.children === 'other-workspace'), JSON.stringify(scopeOptions));
+check('默认值是自动', scopeSelect(scopeReady.seen)?.element.props.value === '',
+  String(scopeSelect(scopeReady.seen)?.element.props.value));
+
+// 桩:记录 list 请求的 sessionId/cwd,并回一份只属于"另一个作用域"的目录。
+const scopeLists = [];
+const scopeSkill = {
+  name: 'scope-other-skill',
+  description: '只存在于另一个会话作用域',
+  provider: 'stub-provider',
+  source: 'user-agents',
+  path: 'C:/tmp/other-workspace/.agents/skills/scope-other-skill/SKILL.md',
+  directory: 'C:/tmp/other-workspace/.agents/skills/scope-other-skill',
+  rootId: 'user-agents',
+  rootLabel: '用户 Agents 技能',
+  modelInvocable: true,
+  userInvocable: true,
+  writable: true,
+  bytes: 32,
+  resourceKind: 'directory',
+};
+const fetchBeforeScope = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = new URL(String(input), window.location.origin);
+  if (url.pathname === '/dsh-skill-center/api' && url.searchParams.get('op') === 'list') {
+    scopeLists.push({ sessionId: url.searchParams.get('sessionId'), cwd: url.searchParams.get('cwd') });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        tier: 'preset-scope',
+        cwd: url.searchParams.get('cwd') ?? OTHER_CWD,
+        complete: true,
+        roots: [],
+        counts: { trash: 0 },
+        skills: [scopeSkill],
+      }),
+    };
+  }
+  return fetchBeforeScope(input, init);
+};
+
+await scopeSelect(scopeReady.seen).element.props.onChange({ target: { value: OTHER_SESSION } });
+const switched = await renderRounds(10);
+const switchedSelect = scopeSelect(switched.seen);
+check('切换后下拉停在所选会话', switchedSelect?.element.props.value === OTHER_SESSION,
+  String(switchedSelect?.element.props.value));
+check('切换后按所选会话重读目录', scopeLists.length > 0
+  && scopeLists[scopeLists.length - 1].sessionId === OTHER_SESSION
+  && scopeLists[scopeLists.length - 1].cwd === OTHER_CWD, JSON.stringify(scopeLists));
+check('列表换成所选作用域的技能', switched.text.includes('scope-other-skill'), switched.text.slice(0, 200));
+
+// 写操作也必须跟着所选作用域走(导出只读文件、走桩,不动真实技能)。
+const scopeExport = exportButton(switched.seen);
+check('所选作用域里的技能可导出', scopeExport !== undefined);
+if (scopeExport !== undefined) await scopeExport.element.props.onClick();
+const scopeExports = posts.filter((body) => body.op === 'export' && body.name === scopeSkill.name);
+check('写操作带上所选会话与 cwd', scopeExports.length === 1
+  && scopeExports[0]?.sessionId === OTHER_SESSION
+  && scopeExports[0]?.cwd === OTHER_CWD, JSON.stringify(scopeExports[0]));
+
+// 切回自动:回到原来的跟随会话(不能把显式选择写进 auto 缓存)。
+const afterScope = await renderRounds(2);
+await scopeSelect(afterScope.seen).element.props.onChange({ target: { value: '' } });
+const autoAgain = await renderRounds(10);
+check('切回自动后下拉回到空值', scopeSelect(autoAgain.seen)?.element.props.value === '',
+  String(scopeSelect(autoAgain.seen)?.element.props.value));
+check('切回自动后按原来的会话重读', scopeLists[scopeLists.length - 1].sessionId === REAL_SESSION
+  && scopeLists[scopeLists.length - 1].cwd === REAL_CWD, JSON.stringify(scopeLists.slice(-2)));
 
 globalThis.fetch = realFetch;
 

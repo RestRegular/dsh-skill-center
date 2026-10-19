@@ -1,7 +1,7 @@
 {
   "name": "@restregular/dsh-skill-center",
-  "version": "0.3.6",
-  "description": "技能中心 — DeepSeek Harness 技能管理面板：浏览当前会话可见的所有技能、查看正文、开关模型/用户调用、新建/删除（回收站）、导入导出技能包；随包附带 skill-authoring 指导技能与 skill_create 模型工具。 · Skill Center for DeepSeek Harness: browse and manage the skills visible to the current session, including a trash, skill import/export, a bundled skill-authoring skill and a skill_create model tool.",
+  "version": "0.3.7",
+  "description": "技能中心 — DeepSeek Harness 技能管理面板：浏览当前会话可见的所有技能、切换查看的会话作用域、查看正文、开关模型/用户调用、新建/删除（回收站）、导入导出技能包；随包附带 skill-authoring 指导技能与 skill_create 模型工具。 · Skill Center for DeepSeek Harness: browse and manage the skills visible to a session (switch the session scope being viewed), including a trash, skill import/export, a bundled skill-authoring skill and a skill_create model tool.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "./icon.svg",
