@@ -35,7 +35,7 @@ Sidebar                                   Main area
 | Capability | Detail |
 |---|---|
 | Browse | Lists every skill visible in the **current session scope**, including skills embedded in plugins, each with provider, source root and invocation policy |
-| Switch scope | The **Scope** dropdown in the toolbar browses another session's skill scope: **Auto (current session)** keeps the original follow-the-main-view pick, while any listed session makes `list` and every write resolve from that session's cwd and preset. It is disabled while invocation edits are staged, so a switch can never carry them into a different scope |
+| Switch scope | The **Scope** dropdown in the toolbar is a custom popup menu that browses another session's skill scope, with sessions grouped by workspace and archived sessions left out. **Auto (current session)** keeps the original follow-the-main-view pick, while any listed session makes `list` and every write resolve from that session's cwd and preset. It is disabled while invocation edits are staged, so a switch can never carry them into a different scope |
 | Search / filter | Search by name or description; filter by provider source |
 | Read body | Renders the raw `SKILL.md` Markdown inside the panel (no right-hand resource pane needed) |
 | Invocation switches | Flips `disable-model-invocation` / `user-invocable` locally — the switch moves at once, with no round trip — and writes them into the frontmatter when you press **Save** beside *Back to session* (the button reads 未修改 → 保存 → 已保存); the host pushes the refreshed catalog to the model immediately |
@@ -145,7 +145,7 @@ Then add the package to the profile's bundle list and restart:
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.8" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.9" }
 }
 ```
 
@@ -305,11 +305,15 @@ second, and the Save button's three states are derived from the staged set (`pen
 "saved once" flag. After a save the overrides are kept until a fresh catalog actually agrees with them
 (`load()` drops the ones that match), so a lagging host snapshot can never bounce the UI back.
 
-The Scope dropdown builds its candidates from `sessions.list` — non-subagent sessions, 50 most recent
-first — and sends the picked `sessionId` / `cwd` with every request, reads and writes alike. Auto keeps
-the original three-step follow (session shown in the main area → last hit → most recently updated);
-picking a session explicitly does not update that cache, so switching back to Auto returns to the
-followed session instead of sticking to the manual choice.
+The Scope dropdown is a custom popup (not a native `<select>`), so it can group candidates by
+workspace with sticky headings and mark the running session. It builds those candidates from
+`sessions.list` and `workspaces.list`: non-subagent sessions, archived sessions removed, one group
+per workspace in host order, ungrouped sessions bucketed by cwd, at most 12 sessions per workspace
+(most recently updated first). The picked `sessionId` / `cwd` rides on every request, reads and
+writes alike. Auto keeps the original three-step follow (session shown in the main area → last hit →
+most recently updated); picking a session explicitly does not update that cache, so switching back
+to Auto returns to the followed session instead of sticking to the manual choice. The source filter
+and the create form's write-location picker use the same dropdown component.
 
 The whole client bundle is wrapped in an IIFE. Plugin bundles are classic scripts in one page and share
 a single global lexical environment that survives a plugin's removal, so re-installing or upgrading the
@@ -371,10 +375,11 @@ stripped, and a `../` entry is rejected without writing anything.
 `client-smoke.mjs` renders the real panel against the live loopback route through a mini React shim,
 and then drives the staged-save flow: the switch flips with no write request, Save issues exactly one
 `setInvocation` carrying both flags, the button steps 未修改 → 保存 → 已保存 (and back to 保存 on the
-next edit), and a lagging catalog snapshot cannot bounce the switch back. It also checks the Scope
-dropdown: it is disabled (with the save-first hint) while edits are staged, lists Auto plus both
-sessions, sends the picked session id and cwd on the next `list` and on an `export`, and goes back to
-the followed session when set to Auto again. The bundle is also run twice inside one `vm` global-script
+next edit), and a lagging catalog snapshot cannot bounce the switch back. It also checks the custom
+Scope dropdown: it is disabled (with the save-first hint) while edits are staged; opening it lists
+Auto plus both sessions **grouped by workspace**, and the archived session in the fixture stays out;
+choosing a session sends its id and cwd on the next `list` and on an `export`, and choosing Auto goes
+back to the followed session. The bundle is also run twice inside one `vm` global-script
 context — the page realm of a reinstall — where the second run must neither throw a redeclaration
 error nor register a second factory. It then walks the delete
 confirmation — 取消 sits to the left of 确认删除?, cancelling returns to 删除 and sends no request. The
@@ -413,8 +418,9 @@ version fails with `E409 Cannot publish over previously staged version <version>
 - Only **filesystem-backed** skills can be managed; skills embedded in plugins are read-only.
 - With no session selected the panel degrades to "read by working directory" and can only see
   embedded skills plus that cwd's project skills; the footer shows the effective cwd and scope tier.
-- The Scope dropdown lists at most the 50 most recently active non-subagent sessions; an older
-  session can still be read through the API by passing its `sessionId`.
+- The Scope dropdown groups sessions by workspace and hides archived ones; each workspace lists at
+  most 12 of its most recently updated sessions. An older session can still be read through the API
+  by passing its `sessionId`.
 - Catalog replacement is all-or-nothing: one switch change makes the host resend the whole skill
   catalog message (a Harness design choice, not this plugin's).
 - `skill_create` is registered host-wide, so every agent sees one more tool schema; it has no
@@ -534,7 +540,7 @@ pnpm add @restregular/dsh-skill-center
 // <profile>/package.json
 {
   "dsh": { "profile": { "bundles": [/* … */ "@restregular/dsh-skill-center"] } },
-  "dependencies": { "@restregular/dsh-skill-center": "^0.3.8" }
+  "dependencies": { "@restregular/dsh-skill-center": "^0.3.9" }
 }
 ```
 
@@ -625,10 +631,13 @@ ctx.slots.inject('main', () => ctx.slots.register({
 直到某次 `list` 的快照真的与它一致（`load()` 只撤销已经追平的那些）——
 所以宿主的目录快照慢半拍也不会把界面弹回去。
 
-作用域下拉从 `sessions.list` 取候选（排除子 Agent 会话，最多最近 50 个），把选中的
-`sessionId` / `cwd` 带给每个请求（读目录、回收站、开关保存、删除、导入导出都一样）。
-「自动」保持原来的三步跟随（主区域会话 → 上次命中 → 最近更新）；显式选择不更新那份缓存，
-所以切回「自动」会回到原来跟随的会话，而不是粘在手动选择上。
+作用域下拉是自定义浮层（不是原生 `<select>`），所以能按工作区分组、给分组标题做吸顶排版、
+标出正在运行的会话。候选同时读 `sessions.list` 与 `workspaces.list`：排除子 Agent 会话与
+**已归档会话**，按宿主的工作区顺序分组，无归属的会话按 cwd 兜底归组，每个工作区最多列
+12 个最近更新的会话。选中的 `sessionId` / `cwd` 带给每个请求（读目录、回收站、开关保存、
+删除、导入导出都一样）。「自动」保持原来的三步跟随（主区域会话 → 上次命中 → 最近更新）；
+显式选择不更新那份缓存，所以切回「自动」会回到原来跟随的会话，而不是粘在手动选择上。
+来源筛选与新建表单的写入位置复用同一个下拉组件。
 
 整个客户端 bundle 包在 IIFE 里。各插件的 bundle 是同一页面里的**经典脚本**，共享一个全局词法
 作用域，而且这个作用域不会随插件卸载消失：页面开着时重装/升级插件，新 bundle 会在同一个 realm
@@ -700,9 +709,10 @@ node "$here\verify-skill.mjs"
 `client-smoke.mjs` 用迷你 React 把真实面板渲染在真宿主回环路由上,再驱动「暂存 + 保存」全流程:
 拨开关不发任何写请求、点保存只发一次带两个策略字段的 `setInvocation`、按钮按
 未修改 → 保存 → 已保存 走(再改一次回到保存)、宿主目录快照慢半拍也弹不回开关;
-然后验证**会话作用域下拉**:有未保存改动时禁用并提示先保存、选项里同时有「自动」和两个会话、
-切到第二个会话后下一次 `list` 与一次 `export` 都带上它的 `sessionId`/`cwd`、切回「自动」回到原来的
-跟随会话;并在同一个 `vm` 全局脚本上下文里把 bundle 执行两遍(模拟页面开着时重装),第二遍既不抛
+然后验证**会话作用域下拉**:有未保存改动时禁用并提示先保存、打开后选项里同时有「自动」和两个会话
+且**按工作区分组**、夹具里的已归档会话不出现、切到第二个会话后下一次 `list` 与一次 `export` 都带上
+它的 `sessionId`/`cwd`、切回「自动」回到原来的跟随会话;并在同一个 `vm` 全局脚本上下文里把 bundle
+执行两遍(模拟页面开着时重装),第二遍既不抛
 重声明错误、也不产生第二次注册;还走一遍删除确认:「取消」出现在「确认删除?」左边、点取消退回
 「删除」且不发任何 delete 请求;新建表单里「创建」旁的「取消」能关掉表单并回到详情;**导出**发一次
 `export` 并触发 `.zip` 下载,**导入**选中文件后发一次带文件名与非空 base64 的 `importSkill`;
@@ -733,7 +743,8 @@ node "$here\verify-skill.mjs"
 - 只能管理**文件系统来源**的技能；插件内嵌技能只读。
 - 没有选中会话时退化为「按工作目录读取」，此时只能看到内嵌技能 + 该 cwd 的项目技能；
   面板底栏会显示实际使用的 cwd 与作用域级别。
-- 作用域下拉最多列出最近活动的 50 个非子 Agent 会话；更早的会话仍可通过 API 传 `sessionId` 访问。
+- 作用域下拉按工作区分组，已归档会话不列出；每个工作区最多 12 个最近更新的会话。更早的会话仍可
+  通过 API 传 `sessionId` 访问。
 - 目录整体替换制：一次开关改动会让模型的技能目录消息整条重发（这是 Harness 自身的设计）。
 - `skill_create` 是宿主级全局注册：每个 Agent 都会多看到一份工具 schema，没有按 Agent 的开关，
   只有卸载插件才会消失。

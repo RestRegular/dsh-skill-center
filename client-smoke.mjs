@@ -65,6 +65,12 @@ const React = {
     }
     return previous.fn;
   },
+  useRef(init) {
+    const inst = rendering;
+    const index = inst.cursor++;
+    if (!(index in inst.hooks)) inst.hooks[index] = { current: init };
+    return inst.hooks[index];
+  },
   useEffect(fn, deps) {
     const inst = rendering;
     const index = inst.cursor++;
@@ -275,6 +281,8 @@ const REAL_CWD = process.env.DSH_SMOKE_CWD ?? process.cwd();
 /** 第二个会话:只用于作用域切换(切换后的 list/trash 请求会被桩拦下,不落真实宿主)。 */
 const OTHER_SESSION = 'session-smoke-other';
 const OTHER_CWD = 'C:\\tmp\\other-workspace';
+/** 已归档会话:作用域菜单必须把它剔除。 */
+const ARCHIVED_SESSION = 'session-smoke-archived';
 
 const ctx = {
   get(service) {
@@ -293,12 +301,33 @@ const ctx = {
               },
               [OTHER_SESSION]: {
                 id: OTHER_SESSION,
-                displayTitle: 'other-workspace',
+                displayTitle: '其他会话',
                 cwd: OTHER_CWD,
                 retainedBy: {},
                 updatedAt: 1,
               },
+              [ARCHIVED_SESSION]: {
+                id: ARCHIVED_SESSION,
+                displayTitle: '已归档会话',
+                cwd: REAL_CWD,
+                retainedBy: {},
+                updatedAt: 3,
+              },
             },
+          }),
+        },
+      };
+    }
+    if (service === 'workspaces') {
+      // 作用域菜单按工作区分组;归档集合从宿主的 workspaces 快照读。
+      return {
+        list: {
+          getSnapshot: () => ({
+            items: [
+              { workspaceId: 'ws-main', title: '主工作区', path: REAL_CWD, sessionIds: [REAL_SESSION, ARCHIVED_SESSION] },
+              { workspaceId: 'ws-other', title: 'other-workspace', path: OTHER_CWD, sessionIds: [OTHER_SESSION] },
+            ],
+            archivedSessionIds: [ARCHIVED_SESSION],
           }),
         },
       };
@@ -722,17 +751,41 @@ check('回收站流程全程没有成功提示条', afterEmpty.seen.every(({ ele
 // ---------------------------------------------------------------------------
 console.log(`\n== 会话作用域切换 ==`);
 
-/** 作用域下拉(用 aria-label 认,免得和来源筛选的 select 混淆)。 */
-const scopeSelect = (seen) => seen.find(({ element }) => element.type === 'select'
-  && element.props['aria-label'] === dictZH.scopeLabel);
-const workspaceOf = (path) => String(path).split(/[\\/]+/u).filter(Boolean).pop();
-const optionsOf = (seen) => seen.filter(({ element }) => element.type === 'option').map(({ element }) => element.props);
+/** 作用域下拉的触发器(用 aria-label 认,免得和来源筛选/写入位置的下拉混淆)。 */
+const scopeTrigger = (seen) => seen.find(({ element }) => element.type === 'button'
+  && element.props['aria-label'] === dictZH.scopeLabel
+  && String(element.props.className).includes('dsh-sc-dropbtn'));
+/** 浮层里的选项(role=option)。 */
+const menuOptions = (seen) => seen
+  .filter(({ element }) => element.props.role === 'option')
+  .map(({ element }) => element.props);
+/** 取子元素里的第一个有效项(单元素时直接返回,数组时跳过 null)。 */
+const firstChild = (children) => (Array.isArray(children)
+  ? children.find((child) => child !== null && child !== undefined && child !== false)
+  : children);
+/** 选项文案:选项里的 span → 内层 span → label span。 */
+const optionLabel = (props) => {
+  const inner = firstChild(props.children);
+  const label = firstChild(inner?.props?.children);
+  return label?.props?.children;
+};
+/** 分组标题。 */
+const groupTitles = (seen) => seen
+  .filter(({ element }) => element.type === 'div' && element.props.className === 'dsh-sc-mgroup')
+  .map(({ element }) => element.props.children?.[0]?.props?.children);
+/** 点开作用域菜单。 */
+const openScopeMenu = async (view) => {
+  const trigger = scopeTrigger(view.seen);
+  check('作用域触发器可点开', trigger !== undefined);
+  await trigger?.element.props.onClick();
+  return renderRounds(3);
+};
 
 // 此刻还有一处未保存的开关改动(保存流程之后又拨了一次):切换必须被挡住,
 // 否则改动会悄悄落到另一个作用域的技能上。
 const intro = await renderRounds(2);
-const scopeIntro = scopeSelect(intro.seen);
-check('工具栏有会话作用域下拉', scopeIntro !== undefined);
+const scopeIntro = scopeTrigger(intro.seen);
+check('工具栏有自定义的会话作用域下拉', scopeIntro !== undefined);
 check('未保存改动时作用域下拉禁用且提示先保存', scopeIntro?.element.props.disabled === true
   && scopeIntro?.element.props.title === dictZH.scopePending,
 `disabled=${String(scopeIntro?.element.props.disabled)} title=${String(scopeIntro?.element.props.title)}`);
@@ -740,21 +793,35 @@ check('未保存改动时作用域下拉禁用且提示先保存', scopeIntro?.e
 // 先保存,再退出回收站(回收站视图里也能切,但这里回到技能列表再看下拉)。
 await saveButton(intro.seen).element.props.onClick();
 const savedForScope = await renderRounds(8);
-check('保存后作用域下拉恢复可用', scopeSelect(savedForScope.seen)?.element.props.disabled === false,
-  String(scopeSelect(savedForScope.seen)?.element.props.disabled));
+check('保存后作用域下拉恢复可用', scopeTrigger(savedForScope.seen)?.element.props.disabled === false,
+  String(scopeTrigger(savedForScope.seen)?.element.props.disabled));
 const scopeBack = backToListButton(savedForScope.seen);
 if (scopeBack !== undefined) await scopeBack.element.props.onClick();
 const scopeReady = await renderRounds(2);
-const scopeOptions = optionsOf(scopeReady.seen).filter((props) => props.value !== undefined
-  && (props.value === '' || props.value === REAL_SESSION || props.value === OTHER_SESSION));
-check('作用域下拉有「自动(当前会话)」', scopeOptions.some((props) => props.value === '' && props.children === dictZH.scopeAuto),
-  JSON.stringify(scopeOptions));
-check('作用域下拉列出当前会话(带工作区名)', scopeOptions.some((props) => props.value === REAL_SESSION
-  && String(props.children).startsWith('主会话 · ' + workspaceOf(REAL_CWD))), JSON.stringify(scopeOptions));
-check('作用域下拉列出另一个会话', scopeOptions.some((props) => props.value === OTHER_SESSION
-  && props.children === 'other-workspace'), JSON.stringify(scopeOptions));
-check('默认值是自动', scopeSelect(scopeReady.seen)?.element.props.value === '',
-  String(scopeSelect(scopeReady.seen)?.element.props.value));
+check('默认值是自动', scopeTrigger(scopeReady.seen)?.element.props['data-value'] === '',
+  String(scopeTrigger(scopeReady.seen)?.element.props['data-value']));
+check('菜单关闭时不渲染选项', menuOptions(scopeReady.seen).length === 0, String(menuOptions(scopeReady.seen).length));
+
+// 键盘:方向键打开、Esc 关闭(自定义浮层不能丢掉原生 select 的可达性)。
+await scopeTrigger(scopeReady.seen).element.props.onKeyDown({ key: 'ArrowDown', preventDefault() {} });
+const keyboardOpen = await renderRounds(3);
+check('方向键能打开作用域菜单', menuOptions(keyboardOpen.seen).length > 0, String(menuOptions(keyboardOpen.seen).length));
+await scopeTrigger(keyboardOpen.seen).element.props.onKeyDown({ key: 'Escape', preventDefault() {} });
+const keyboardClosed = await renderRounds(2);
+check('Esc 能关闭作用域菜单', menuOptions(keyboardClosed.seen).length === 0, String(menuOptions(keyboardClosed.seen).length));
+
+const opened = await openScopeMenu(scopeReady);
+const openedOptions = menuOptions(opened.seen);
+check('作用域菜单有「自动(当前会话)」', openedOptions.some((props) => props['data-value'] === ''
+  && optionLabel(props) === dictZH.scopeAuto), JSON.stringify(openedOptions.map(optionLabel)));
+check('作用域菜单按工作区分组', groupTitles(opened.seen).includes('主工作区')
+  && groupTitles(opened.seen).includes('other-workspace'), JSON.stringify(groupTitles(opened.seen)));
+check('作用域菜单列出当前会话', openedOptions.some((props) => props['data-value'] === REAL_SESSION
+  && optionLabel(props) === '主会话'), JSON.stringify(openedOptions.map(optionLabel)));
+check('作用域菜单列出另一个会话', openedOptions.some((props) => props['data-value'] === OTHER_SESSION
+  && optionLabel(props) === '其他会话'), JSON.stringify(openedOptions.map(optionLabel)));
+check('已归档会话不出现在作用域菜单', openedOptions.every((props) => props['data-value'] !== ARCHIVED_SESSION)
+  && !opened.text.includes('已归档会话'), JSON.stringify(openedOptions.map(optionLabel)));
 
 // 桩:记录 list 请求的 sessionId/cwd,并回一份只属于"另一个作用域"的目录。
 const scopeLists = [];
@@ -795,11 +862,14 @@ globalThis.fetch = async (input, init) => {
   return fetchBeforeScope(input, init);
 };
 
-await scopeSelect(scopeReady.seen).element.props.onChange({ target: { value: OTHER_SESSION } });
+const otherOption = opened.seen.find(({ element }) => element.props.role === 'option'
+  && element.props['data-value'] === OTHER_SESSION);
+check('作用域菜单里能选中另一个会话', otherOption !== undefined);
+await otherOption.element.props.onClick();
 const switched = await renderRounds(10);
-const switchedSelect = scopeSelect(switched.seen);
-check('切换后下拉停在所选会话', switchedSelect?.element.props.value === OTHER_SESSION,
-  String(switchedSelect?.element.props.value));
+const switchedTrigger = scopeTrigger(switched.seen);
+check('切换后下拉停在所选会话', switchedTrigger?.element.props['data-value'] === OTHER_SESSION,
+  String(switchedTrigger?.element.props['data-value']));
 check('切换后按所选会话重读目录', scopeLists.length > 0
   && scopeLists[scopeLists.length - 1].sessionId === OTHER_SESSION
   && scopeLists[scopeLists.length - 1].cwd === OTHER_CWD, JSON.stringify(scopeLists));
@@ -815,11 +885,14 @@ check('写操作带上所选会话与 cwd', scopeExports.length === 1
   && scopeExports[0]?.cwd === OTHER_CWD, JSON.stringify(scopeExports[0]));
 
 // 切回自动:回到原来的跟随会话(不能把显式选择写进 auto 缓存)。
-const afterScope = await renderRounds(2);
-await scopeSelect(afterScope.seen).element.props.onChange({ target: { value: '' } });
+const reopened = await openScopeMenu(await renderRounds(2));
+const autoOption = reopened.seen.find(({ element }) => element.props.role === 'option'
+  && element.props['data-value'] === '');
+check('切回自动前菜单里有「自动」选项', autoOption !== undefined);
+await autoOption.element.props.onClick();
 const autoAgain = await renderRounds(10);
-check('切回自动后下拉回到空值', scopeSelect(autoAgain.seen)?.element.props.value === '',
-  String(scopeSelect(autoAgain.seen)?.element.props.value));
+check('切回自动后下拉回到空值', scopeTrigger(autoAgain.seen)?.element.props['data-value'] === '',
+  String(scopeTrigger(autoAgain.seen)?.element.props['data-value']));
 check('切回自动后按原来的会话重读', scopeLists[scopeLists.length - 1].sessionId === REAL_SESSION
   && scopeLists[scopeLists.length - 1].cwd === REAL_CWD, JSON.stringify(scopeLists.slice(-2)));
 

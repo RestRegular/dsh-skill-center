@@ -99,9 +99,14 @@ window.__ModuleLoader__.load({
         scopeCwd: '未绑定会话,按工作目录读取',
         scopeLabel: '作用域',
         scopeAuto: '自动(当前会话)',
+        scopeAutoHint: '跟随主区域正在显示的会话',
         scopeHint: '切换要查看的会话作用域:技能按所选会话的 cwd 与预设解析',
         scopePending: '先保存未保存的调用开关改动,再切换作用域',
+        scopeDefaultWorkspace: '默认工作区',
+        scopeUngrouped: '未分组',
+        scopeRunning: '运行中',
         filterAll: '全部来源',
+        filterSource: '来源筛选',
         total: '{n} 个技能',
         shown: '显示 {n} / {m}',
         whenToUse: '何时使用',
@@ -169,8 +174,13 @@ window.__ModuleLoader__.load({
         scopeCwd: 'No session bound; read from the working directory',
         scopeLabel: 'Scope',
         scopeAuto: 'Auto (current session)',
+        scopeAutoHint: 'Follow the session shown in the main area',
         scopeHint: 'Switch the session scope being browsed: skills resolve from that session\'s cwd and preset',
         scopePending: 'Save the pending invocation changes before switching scope',
+        scopeDefaultWorkspace: 'Default workspace',
+        scopeUngrouped: 'Ungrouped',
+        scopeRunning: 'Running',
+        filterSource: 'Source filter',
         filterAll: 'All sources',
         total: '{n} skills',
         shown: 'Showing {n} of {m}',
@@ -224,10 +234,30 @@ window.__ModuleLoader__.load({
 .dsh-sc-spacer{flex:1}
 .dsh-sc-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dsh-sc-scope{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:280px}
-.dsh-sc-scope .dsh-sc-select{max-width:230px;min-width:0;text-overflow:ellipsis}
+.dsh-sc-scope .dsh-sc-dropbtn{max-width:230px}
 .dsh-sc-input{flex:1;min-width:140px;padding:6px 10px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit;outline:none}
 .dsh-sc-input:focus-visible{border-color:var(--dsw-alias-state-business-primary)}
-.dsh-sc-select{padding:6px 8px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit}
+.dsh-sc-drop{position:relative;display:inline-flex;min-width:0;vertical-align:middle}
+.dsh-sc-dropbtn{display:inline-flex;align-items:center;gap:6px;max-width:240px;min-width:0;padding:6px 8px 6px 10px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit;line-height:1.4;cursor:pointer}
+.dsh-sc-dropbtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-sc-dropbtn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-sc-dropbtn[aria-expanded="true"]{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-bg-layer-1)}
+.dsh-sc-dropbtn:disabled{opacity:.45;cursor:default}
+.dsh-sc-droplabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.dsh-sc-caret{flex:none;opacity:.55;transition:transform .15s ease}
+.dsh-sc-dropbtn[aria-expanded="true"] .dsh-sc-caret{transform:rotate(180deg)}
+.dsh-sc-menu{position:absolute;z-index:60;top:calc(100% + 5px);left:0;width:260px;max-width:calc(100vw - 40px);max-height:320px;overflow:auto;padding:5px;border-radius:var(--dsw-radius-lg,12px);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 12px 32px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:1px}
+.dsh-sc-mgroup{position:sticky;top:-5px;z-index:1;display:flex;align-items:center;gap:6px;margin-top:3px;padding:6px 8px 4px;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-caption);font-size:11px;font-weight:600;letter-spacing:.02em}
+.dsh-sc-mgroup:first-child{border-top:none;margin-top:0}
+.dsh-sc-mgroup-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-sc-mgroup-count{flex:none;font-weight:400;color:var(--dsw-alias-label-caption)}
+.dsh-sc-mopt{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:1.4;text-align:left;cursor:pointer}
+.dsh-sc-mopt-active{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-sc-mopt-on{background:var(--dsw-alias-interactive-bg-active)}
+.dsh-sc-mopt-inner{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.dsh-sc-mopt-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-sc-mopt-hint{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-caption);font-size:11px}
+.dsh-sc-mopt-check{flex:none;width:13px;height:13px;color:var(--dsw-alias-state-business-primary)}
 .dsh-sc-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-button-elevated-fill);color:var(--dsw-alias-label-primary);font-size:13px;font-family:inherit;cursor:pointer;line-height:1.4;white-space:nowrap}
 .dsh-sc-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-sc-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
@@ -327,44 +357,121 @@ window.__ModuleLoader__.load({
       return parts.length === 0 ? undefined : parts[parts.length - 1];
     }
 
+    /** 每个工作区在作用域菜单里最多列出的会话数:再多的历史会话交给面板的搜索框。 */
+    const SCOPE_PER_WORKSPACE = 12;
+
     /**
-     * 把客户端会话目录投影成作用域下拉的候选。
+     * 工作区显示名:宿主把默认工作区存成 `default-workspace`,这里换成界面文案。
+     * @param workspace - 客户端 workspaces 快照里的工作区视图。
+     * @param t - 取词函数。
+     * @returns 显示名。
+     */
+    function workspaceTitleOf(workspace, t) {
+      const title = typeof workspace?.title === 'string' ? workspace.title : '';
+      if (title === '' || title === 'default-workspace') return t('scopeDefaultWorkspace');
+      return title;
+    }
+
+    /**
+     * 把客户端会话目录投影成作用域菜单的分组候选。
      *
      * 技能作用域由「会话 cwd + 会话预设」共同决定,所以候选按会话(而不是按工作区)
-     * 列出:同一工作区里的两个会话若挂的是不同预设,技能目录本来就可能不同。
-     * 子 Agent 会话不在这里出现 —— 它们是父会话的延伸,不是用户要切换的浏览对象。
-     * 列表按最近活动排序并截断,避免几百个历史会话把下拉撑爆。
+     * 列出;但菜单按工作区分组,和侧栏的心智模型一致。已归档的会话不进候选:
+     * 它们属于历史,不是用户此刻要切换过去浏览的对象。子 Agent 会话同样不出现。
+     *
+     * 没有 workspaces 服务的老宿主会退化成按 cwd 分组;每个工作区最多列
+     * SCOPE_PER_WORKSPACE 个最近会话,避免下拉被几百个历史会话撑爆。
      *
      * @param sessions - 客户端 sessions 服务。
-     * @returns `[{ id, label, cwd }]`。
+     * @param workspaces - 客户端 workspaces 服务(可缺省)。
+     * @param t - 取词函数。
+     * @returns `{ groups, options }`:分组里有 `title`,平铺的 `options` 用于取值校验。
      */
-    function scopeOptionsOf(sessions) {
+    function scopeGroupsOf(sessions, workspaces, t) {
       let rows = [];
       try {
-        const snapshot = sessions?.list?.getSnapshot?.();
-        rows = Object.values(snapshot?.byId ?? {});
+        rows = Object.values(sessions?.list?.getSnapshot?.()?.byId ?? {});
       } catch {
         /* 会话服务不可用时只留"自动" */
       }
-      const options = rows
-        .filter((row) => row?.id !== undefined && row.origin !== 'subagent' && row.parentId === undefined)
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-        .slice(0, 50)
-        .map((row) => {
-          const id = String(row.id);
-          const base = String(row.displayTitle ?? row.title ?? id);
-          const workspace = workspaceNameOf(row.cwd);
-          const label = workspace === undefined || workspace === base ? base : `${base} · ${workspace}`;
-          return { id, label, cwd: row.cwd };
-        });
-      // 同工作区里未命名的会话会重名:给重名项补一段 id,仍然一眼能区分。
-      const used = new Map();
-      for (const option of options) {
-        const count = used.get(option.label) ?? 0;
-        used.set(option.label, count + 1);
-        if (count > 0) option.label = `${option.label} (${option.id.slice(-6)})`;
+      const archived = new Set();
+      let workspaceItems = [];
+      try {
+        const snapshot = workspaces?.list?.getSnapshot?.();
+        for (const id of snapshot?.archivedSessionIds ?? []) archived.add(String(id));
+        if (Array.isArray(snapshot?.items)) workspaceItems = snapshot.items;
+      } catch {
+        /* 工作区服务不可用时按 cwd 兜底分组 */
       }
-      return options;
+      const byId = new Map();
+      for (const row of rows) {
+        if (row?.id === undefined) continue;
+        if (row.origin === 'subagent' || row.parentId !== undefined) continue;
+        const id = String(row.id);
+        if (archived.has(id)) continue;
+        byId.set(id, row);
+      }
+      const groups = [];
+      const options = [];
+      const assigned = new Set();
+      /** 同一工作区里未命名的会话会重名:给重名项补一段 id,仍然一眼能区分。 */
+      const pushGroup = (key, title, path, members) => {
+        if (members.length === 0) return;
+        const used = new Map();
+        const groupOptions = members
+          .slice()
+          .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+          .slice(0, SCOPE_PER_WORKSPACE)
+          .map((row) => {
+            const id = String(row.id);
+            const base = String(row.displayTitle ?? row.title ?? id).trim() || id;
+            const count = used.get(base) ?? 0;
+            used.set(base, count + 1);
+            return {
+              value: id,
+              label: count === 0 ? base : `${base} (${id.slice(-6)})`,
+              hint: row.running === true ? t('scopeRunning') : undefined,
+              title: typeof row.cwd === 'string' ? row.cwd : undefined,
+            };
+          });
+        groups.push({
+          key,
+          title,
+          hint: path,
+          count: groupOptions.length,
+          options: groupOptions,
+        });
+        options.push(...groupOptions);
+      };
+      for (const workspace of workspaceItems) {
+        const members = [];
+        for (const rawId of workspace?.sessionIds ?? []) {
+          const id = String(rawId);
+          const row = byId.get(id);
+          if (row === undefined || assigned.has(id)) continue;
+          assigned.add(id);
+          members.push(row);
+        }
+        pushGroup(
+          String(workspace.workspaceId ?? workspaceTitleOf(workspace, t)),
+          workspaceTitleOf(workspace, t),
+          typeof workspace.path === 'string' ? workspace.path : undefined,
+          members,
+        );
+      }
+      // 没归属任何工作区的会话(以及老宿主):按 cwd 归组,至少保持"按工作区"的形状。
+      const leftovers = new Map();
+      for (const [id, row] of byId) {
+        if (assigned.has(id)) continue;
+        const key = typeof row.cwd === 'string' ? row.cwd : '';
+        const bucket = leftovers.get(key) ?? [];
+        bucket.push(row);
+        leftovers.set(key, bucket);
+      }
+      for (const [cwd, members] of leftovers) {
+        pushGroup(`cwd:${cwd}`, workspaceNameOf(cwd) ?? t('scopeUngrouped'), cwd, members);
+      }
+      return { groups, options };
     }
 
     /**
@@ -432,6 +539,191 @@ window.__ModuleLoader__.load({
           h('span', { key: 'l', className: 'dsh-sc-switchlabel' }, label),
           h('span', { key: 'h', className: 'dsh-sc-hint' }, hint),
         ]),
+      ]);
+    }
+
+    /**
+     * 自定义下拉:一个触发器按钮 + 浮层菜单。
+     *
+     * 用自定义浮层而不是原生 `<select>`,是为了让作用域菜单能按工作区分组、
+     * 给分组标题和"运行中"加排版;来源筛选与写入位置共用同一个组件。
+     *
+     * 交互:点触发器开合;方向键移动高亮,Enter/Space 选中,Esc 关闭;
+     * 点浮层外关闭。触发器保留焦点,因此键盘操作不依赖菜单项是否能聚焦。
+     *
+     * @param props - `{ value, label, options, groups, onChange, disabled, title, ariaLabel, menuWidth }`。
+     * @returns 下拉元素。
+     */
+    function Dropdown({ value, label, options, groups, onChange, disabled = false, title, ariaLabel, menuWidth = 260 }) {
+      const [open, setOpen] = React.useState(false);
+      const [active, setActive] = React.useState(-1);
+      const rootRef = React.useRef(null);
+      const flat = groups === undefined
+        ? (Array.isArray(options) ? options : [])
+        : groups.flatMap((group) => group.options ?? []);
+      const current = flat.find((option) => option.value === value);
+      const shown = label ?? current?.label ?? '';
+
+      React.useEffect(() => {
+        if (!open) return undefined;
+        setActive(flat.findIndex((option) => option.value === value));
+        const onPointer = (event) => {
+          const root = rootRef.current;
+          if (root !== null && typeof root?.contains === 'function' && root.contains(event?.target)) return;
+          setOpen(false);
+        };
+        const onKey = (event) => { if (event?.key === 'Escape') setOpen(false); };
+        document.addEventListener?.('pointerdown', onPointer, true);
+        document.addEventListener?.('keydown', onKey);
+        return () => {
+          document.removeEventListener?.('pointerdown', onPointer, true);
+          document.removeEventListener?.('keydown', onKey);
+        };
+        // 只在开合时挂/摘全局监听:菜单打开期间 value 不变也不需要重挂。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [open]);
+
+      const choose = (next) => {
+        if (disabled) return;
+        setOpen(false);
+        if (next !== value) onChange(next);
+      };
+
+      /**
+       * 触发器上的键盘导航。
+       * @param event - 键盘事件。
+       */
+      const onKeyDown = (event) => {
+        if (disabled) return;
+        const key = event?.key;
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+          event.preventDefault?.();
+          if (!open) { setOpen(true); return; }
+          setActive((previous) => {
+            if (flat.length === 0) return -1;
+            const step = key === 'ArrowDown' ? 1 : -1;
+            const from = previous < 0 ? (step > 0 ? -1 : 0) : previous;
+            return (from + step + flat.length) % flat.length;
+          });
+          return;
+        }
+        if (key === 'Enter' || key === ' ') {
+          event.preventDefault?.();
+          if (!open) { setOpen(true); return; }
+          const picked = flat[active];
+          if (picked !== undefined) choose(picked.value);
+          return;
+        }
+        if (key === 'Escape' && open) {
+          event.preventDefault?.();
+          setOpen(false);
+          return;
+        }
+        if (key === 'Tab') setOpen(false);
+      };
+
+      let optionIndex = -1;
+      /**
+       * 渲染一行选项(平铺与分组共用)。
+       * @param option - `{ value, label, hint, title }`。
+       * @returns 选项元素。
+       */
+      const renderOption = (option) => {
+        optionIndex += 1;
+        const at = optionIndex;
+        const selected = option.value === value;
+        return h('div', {
+          key: `o:${at}`,
+          role: 'option',
+          'aria-selected': selected,
+          'data-value': option.value,
+          tabIndex: -1,
+          title: option.title ?? option.hint,
+          className: [
+            'dsh-sc-mopt',
+            at === active ? 'dsh-sc-mopt-active' : '',
+            selected ? 'dsh-sc-mopt-on' : '',
+          ].filter(Boolean).join(' '),
+          onMouseEnter: () => setActive(at),
+          onClick: () => choose(option.value),
+        }, [
+          h('span', { key: 'x', className: 'dsh-sc-mopt-inner' }, [
+            h('span', { key: 'l', className: 'dsh-sc-mopt-label' }, option.label),
+            option.hint === undefined
+              ? null
+              : h('span', { key: 'h', className: 'dsh-sc-mopt-hint' }, option.hint),
+          ]),
+          selected ? h('svg', {
+            key: 'k',
+            className: 'dsh-sc-mopt-check',
+            width: 13,
+            height: 13,
+            viewBox: '0 0 16 16',
+            'aria-hidden': true,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 2,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          }, h('path', { key: 'p', d: 'M3.2 8.6 6.3 11.7 12.8 4.8' })) : null,
+        ]);
+      };
+
+      const menu = [];
+      if (groups === undefined) {
+        for (const option of flat) menu.push(renderOption(option));
+      } else {
+        for (const group of groups) {
+          if (group.title !== undefined) {
+            menu.push(h('div', { key: `g:${group.key}`, className: 'dsh-sc-mgroup', 'aria-hidden': true }, [
+              h('span', { key: 'n', className: 'dsh-sc-mgroup-name', title: group.hint }, group.title),
+              group.count === undefined
+                ? null
+                : h('span', { key: 'c', className: 'dsh-sc-mgroup-count' }, String(group.count)),
+            ]));
+          }
+          for (const option of group.options ?? []) menu.push(renderOption(option));
+        }
+      }
+
+      return h('div', { className: 'dsh-sc-drop', ref: rootRef }, [
+        h('button', {
+          key: 't',
+          type: 'button',
+          className: 'dsh-sc-dropbtn',
+          'aria-label': ariaLabel,
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open,
+          'data-value': value,
+          title,
+          disabled,
+          onClick: () => { if (!disabled) setOpen((previous) => !previous); },
+          onKeyDown,
+        }, [
+          h('span', { key: 'l', className: 'dsh-sc-droplabel' }, shown),
+          h('svg', {
+            key: 'c',
+            className: 'dsh-sc-caret',
+            width: 10,
+            height: 10,
+            viewBox: '0 0 12 12',
+            'aria-hidden': true,
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.5,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          }, h('path', { key: 'p', d: 'M2.5 4.5 6 8l3.5-3.5' })),
+        ]),
+        open
+          ? h('div', {
+            key: 'm',
+            className: 'dsh-sc-menu',
+            role: 'listbox',
+            'aria-label': ariaLabel,
+            style: { width: menuWidth },
+          }, menu)
+          : null,
       ]);
     }
 
@@ -503,9 +795,10 @@ window.__ModuleLoader__.load({
     function makePage(ctx, localT) {
       const sessions = ctx.get('sessions');
       const scopeCache = {};
-
       return function SkillCenterPage(props) {
         const t = typeof props?.t === 'function' ? props.t : localT;
+        /** 工作区服务:用来把作用域候选按工作区分组、并读归档集合(老宿主可能没有)。 */
+        const workspaces = ctx.get('workspaces');
         const [catalog, setCatalog] = React.useState(undefined);
         const [error, setError] = React.useState(undefined);
         const [busy, setBusy] = React.useState(false);
@@ -538,14 +831,40 @@ window.__ModuleLoader__.load({
         const [pendingTrashDelete, setPendingTrashDelete] = React.useState(false);
         /** 用户在作用域下拉里显式选中的会话 id;空串 = 自动。 */
         const [scopeSessionId, setScopeSessionId] = React.useState('');
-        const scopeOptions = scopeOptionsOf(sessions);
+        const [, bumpSessionRevision] = React.useState(0);
+        // 会话目录与归档集合都是宿主流进来的:订阅它们,新会话/归档操作能立刻反映到菜单。
+        React.useEffect(() => {
+          const stores = [sessions?.list, workspaces?.list]
+            .filter((store) => typeof store?.subscribe === 'function');
+          if (stores.length === 0) return undefined;
+          const bump = () => bumpSessionRevision((previous) => previous + 1);
+          const disposers = stores.map((store) => store.subscribe(bump));
+          return () => {
+            for (const dispose of disposers) {
+              try { dispose?.(); } catch { /* 摘除失败不影响卸载 */ }
+            }
+          };
+        }, []);
+        const scopeMenu = scopeGroupsOf(sessions, workspaces, t);
+        /** 菜单:最上面一行"自动",其余按工作区分组(已归档会话不在候选里)。 */
+        const scopeGroups = [
+          {
+            key: '__auto',
+            options: [{ value: '', label: t('scopeAuto'), hint: t('scopeAutoHint') }],
+          },
+          ...scopeMenu.groups,
+        ];
+        const scopeOptions = scopeMenu.options;
         /**
-         * 真正生效的作用域:选中的会话已经不在会话目录里(归档/删除)时回落到自动,
+         * 真正生效的作用域:选中的会话已经不在候选里(归档/删除)时回落到自动,
          * 免得下拉停在一个不存在的选项上、请求却还带着旧 id。
          */
-        const scopeValue = scopeOptions.some((option) => option.id === scopeSessionId)
+        const scopeValue = scopeOptions.some((option) => option.value === scopeSessionId)
           ? scopeSessionId
           : '';
+        const scopeLabelText = scopeValue === ''
+          ? t('scopeAuto')
+          : (scopeOptions.find((option) => option.value === scopeValue)?.label ?? t('scopeAuto'));
 
         const load = React.useCallback(async () => {
           setBusy(true);
@@ -638,12 +957,12 @@ window.__ModuleLoader__.load({
          * 不会走到这里把改动悄悄丢掉。目录先清成 undefined,渲染出"正在读取",
          * 避免新选择器下面短暂挂着上一个作用域的技能列表;真正的重读由
          * `load` 的依赖(scopeValue)变化触发。
-         * @param event - 下拉的 change 事件。
+         * @param next - 下拉选中的会话 id;空串 = 自动。
          */
-        const switchScope = (event) => {
-          const next = String(event?.target?.value ?? '');
-          if (next === scopeValue) return;
-          setScopeSessionId(next);
+        const switchScope = (next) => {
+          const value = String(next ?? '');
+          if (value === scopeValue) return;
+          setScopeSessionId(value);
           setCatalog(undefined);
           setSelected(undefined);
           setBody(undefined);
@@ -955,24 +1274,20 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsh-sc-tools', key: 'r2' }, [
             // 作用域选择:默认"自动"沿用原来的跟随逻辑(主区域会话 → 最近会话),
             // 选中某个会话后,读目录与所有写操作都改用它解析 cwd/预设。
+            // 候选来自 sessions.list,按 workspaces 的工作区分组,已归档会话被剔除。
             h('div', { key: 'scope', className: 'dsh-sc-scope' }, [
               h('span', { key: 'l', className: 'dsh-sc-hint' }, t('scopeLabel')),
-              h('select', {
-                key: 's',
-                className: 'dsh-sc-select',
+              h(Dropdown, {
+                key: 'd',
                 value: scopeValue,
-                'aria-label': t('scopeLabel'),
-                title: pendingCount > 0 ? t('scopePending') : t('scopeHint'),
-                disabled: busy || pendingCount > 0,
+                label: scopeLabelText,
+                groups: scopeGroups,
                 onChange: switchScope,
-              }, [
-                h('option', { key: '__auto', value: '' }, t('scopeAuto')),
-                ...scopeOptions.map((option) => h('option', {
-                  key: option.id,
-                  value: option.id,
-                  title: option.cwd ?? '',
-                }, option.label)),
-              ]),
+                disabled: busy || pendingCount > 0,
+                title: pendingCount > 0 ? t('scopePending') : t('scopeHint'),
+                ariaLabel: t('scopeLabel'),
+                menuWidth: 300,
+              }),
             ]),
             h('input', {
               key: 'q',
@@ -982,15 +1297,17 @@ window.__ModuleLoader__.load({
               value: query,
               onChange: (event) => setQuery(event.target.value),
             }),
-            sources.length > 1 ? h('select', {
+            sources.length > 1 ? h(Dropdown, {
               key: 'f',
-              className: 'dsh-sc-select',
               value: sourceFilter,
-              onChange: (event) => setSourceFilter(event.target.value),
-            }, [
-              h('option', { key: '__all', value: '' }, t('filterAll')),
-              ...sources.map((source) => h('option', { key: source, value: source }, source)),
-            ]) : null,
+              options: [
+                { value: '', label: t('filterAll') },
+                ...sources.map((source) => ({ value: source, label: source })),
+              ],
+              onChange: (next) => setSourceFilter(String(next ?? '')),
+              ariaLabel: t('filterSource'),
+              menuWidth: 200,
+            }) : null,
             h('button', {
               key: 'trash',
               type: 'button',
@@ -1303,12 +1620,19 @@ window.__ModuleLoader__.load({
           }),
           h('div', { key: 'r', className: 'dsh-sc-tools' }, [
             h('span', { key: 'l', className: 'dsh-sc-hint' }, t('formRoot')),
-            h('select', {
-              key: 's', className: 'dsh-sc-select', value: rootId,
-              onChange: (event) => setRootId(event.target.value),
-            }, roots.map((root) => h('option', {
-              key: root.id, value: root.id, title: root.path,
-            }, `${root.label} — ${root.path}`))),
+            h(Dropdown, {
+              key: 's',
+              value: rootId,
+              options: roots.map((root) => ({
+                value: root.id,
+                label: root.label,
+                hint: root.path,
+                title: root.path,
+              })),
+              onChange: (next) => setRootId(String(next ?? '')),
+              ariaLabel: t('formRoot'),
+              menuWidth: 340,
+            }),
           ]),
           h('p', { key: 'rh', className: 'dsh-sc-hint', style: { margin: 0 } }, t('formRootHint')),
           h('div', { key: 'a', className: 'dsh-sc-actions' }, [
