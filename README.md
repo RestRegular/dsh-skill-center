@@ -126,6 +126,12 @@ loses the tool instead of failing to mount.
 
 ## Install
 
+### One command (CLI)
+
+```bash
+dsh plugin --profile web add @restregular/dsh-skill-center
+```
+
 ### From the plugin marketplace (GUI)
 
 1. Open the **Plugins** entry in the sidebar.
