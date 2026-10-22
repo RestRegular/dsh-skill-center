@@ -4,6 +4,7 @@
 [![license](https://img.shields.io/npm/l/@restregular/dsh-skill-center?color=blue)](./LICENSE)
 [![node](https://img.shields.io/node/v/@restregular/dsh-skill-center)](package.json)
 [![dsh plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4a6cf7)](https://github.com/RestRegular/dsh-skill-center)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/restregular/dsh-skill-center)
 
 **English** · [中文](#中文)
 
